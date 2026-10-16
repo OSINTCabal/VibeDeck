@@ -1,0 +1,17 @@
+{
+  "name": "vibedeck-shell",
+  "version": "1.0.0",
+  "description": "VibeDeck frameless desktop shell (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.js"
+  },
+  "keywords": [],
+  "type": "commonjs",
+  "private": true,
+  "engines": { "node": ">=22.12" },
+  "dependencies": {
+    "electron": "^44.6.0"
+  }
+}

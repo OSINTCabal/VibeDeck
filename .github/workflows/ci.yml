@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  sidecar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+      - name: Create venv + install deps
+        run: |
+          uv venv .venv --python 3.12
+          uv pip install --python .venv/bin/python ".[dev]"
+      - name: Lint (ruff)
+        run: |
+          uv pip install --python .venv/bin/python ruff
+          .venv/bin/ruff check sidecar tests scripts
+      - name: Unit tests
+        run: .venv/bin/python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck
+        run: ./node_modules/.bin/tsc -b
+      - name: Frontend and Electron data tests
+        run: node --test tests/*.cjs ../shell/electron/tests/*.js
+      - name: Build
+        run: ./node_modules/.bin/vite build
+
+  linux-native:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [debian:12, fedora:44]
+    container: ${{ matrix.image }}
+    steps:
+      - name: System prerequisites
+        run: |
+          if command -v apt-get >/dev/null; then
+            apt-get update -qq
+            apt-get install -y git curl ca-certificates python3 python3-venv xz-utils xvfb openbox \
+              libgtk-3-0 libnss3 libasound2 libgbm1 libatk-bridge2.0-0 libxss1 libdrm2 libxkbcommon0
+          else
+            dnf install -y --setopt=install_weak_deps=False --disablerepo=fedora-cisco-openh264 git curl ca-certificates python3 xz xorg-x11-server-Xvfb openbox \
+              gtk3 nss alsa-lib mesa-libgbm at-spi2-atk libXScrnSaver libdrm libxkbcommon
+          fi
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Install native Vibe and sidecar
+        run: |
+          uv python install 3.14
+          uv tool install mistral-vibe==2.26.0 --python 3.14
+          uv venv --python 3.14
+          uv pip install --python .venv/bin/python ".[dev]"
+      - name: Offline application and native provider routing
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          .venv/bin/python -m pytest -q
+          .venv/bin/python scripts/check_provider_interop.py
+          .venv/bin/python scripts/check_subagents.py
+          .venv/bin/python scripts/check_native_interop.py
+      - name: Install desktop test runtimes
+        run: |
+          curl -fsSLO https://nodejs.org/dist/v22.22.3/node-v22.22.3-linux-x64.tar.xz
+          curl -fsS https://nodejs.org/dist/v22.22.3/SHASUMS256.txt | awk '$2 == "node-v22.22.3-linux-x64.tar.xz"' | sha256sum -c -
+          mkdir -p /opt/node
+          tar -xJf node-v22.22.3-linux-x64.tar.xz -C /opt/node --strip-components=1
+          rm node-v22.22.3-linux-x64.tar.xz
+          export PATH="/opt/node/bin:$HOME/.local/bin:$PATH"
+          corepack enable
+          (cd frontend && pnpm install --frozen-lockfile && pnpm test && pnpm build)
+          (cd shell/electron && npm ci --no-audit --no-fund && node node_modules/electron/install.js && npm test)
+          uv pip install --python .venv/bin/python playwright
+          .venv/bin/python -m playwright install chromium
+      - name: Verify the shared installer from a clean user profile
+        run: |
+          export PATH="/opt/node/bin:$HOME/.local/bin:$PATH"
+          bash packaging/install.sh
+      - name: Isolated browser and Electron workflows
+        run: |
+          export PATH="/opt/node/bin:$HOME/.local/bin:$PATH"
+          export DISPLAY=:99
+          export VIBEDECK_TEST_NO_SANDBOX=1
+          export VIBEDECK_CHROME="$(.venv/bin/python -c 'from playwright.sync_api import sync_playwright; p=sync_playwright().start(); print(p.chromium.executable_path); p.stop()')"
+          Xvfb :99 -screen 0 1440x1000x24 -nolisten tcp &
+          xvfb_pid=$!
+          for attempt in $(seq 1 50); do
+            [ -S /tmp/.X11-unix/X99 ] && break
+            sleep .1
+          done
+          test -S /tmp/.X11-unix/X99
+          openbox &
+          wm_pid=$!
+          trap 'kill "$wm_pid" "$xvfb_pid" 2>/dev/null || true' EXIT
+          .venv/bin/python scripts/check_browser.py
+          .venv/bin/python scripts/check_electron.py
+          export VIBEDECK_PLAYWRIGHT="$(.venv/bin/python -c 'from pathlib import Path; import playwright; print(Path(playwright.__file__).parent / "driver/package")')"
+          export VIBEDECK_FRESH_INSTALL=1
+          node scripts/check_fresh_install.cjs
