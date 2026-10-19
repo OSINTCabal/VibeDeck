@@ -36,8 +36,18 @@ const {chromium} = require(process.env.VIBEDECK_PLAYWRIGHT);
       await page.getByRole('button',{name:mode,exact:true}).click();
       assert((await page.getByRole('button',{name:'Select agent',exact:true}).innerText()).includes(mode));
     }
-    console.log('PASS: installed launcher, sidecar boot, first-run sign-in, default Mistral, built-in agents without provider setup, all four coding modes');
-    await page.getByRole('button',{name:'Close',exact:true}).click();
+    const closeButton = page.getByRole('button',{name:'Close',exact:true});
+    await closeButton.waitFor();
+    const pageClosed = page.waitForEvent('close',{timeout:10000});
+    const [click, closed] = await Promise.allSettled([
+      closeButton.click(),
+      pageClosed,
+    ]);
+    if(closed.status==='rejected') throw closed.reason;
+    if(click.status==='rejected' && !String(click.reason).includes('Target page, context or browser has been closed')) throw click.reason;
+    for(let n=0;n<50 && child.exitCode===null;n++) await new Promise(resolve=>setTimeout(resolve,100));
+    assert.equal(child.exitCode,0,'Closing the window should exit the installed launcher successfully');
+    console.log('PASS: installed launcher, sidecar boot, first-run sign-in, default Mistral, built-in agents without provider setup, all four coding modes, clean window close');
   } finally {
     if(browser) await browser.close().catch(()=>{});
     if(child.exitCode===null) child.kill('SIGTERM');
