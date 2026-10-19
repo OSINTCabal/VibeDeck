@@ -645,15 +645,21 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.emulate_media(reduced_motion="reduce")
         duration = await page.locator("button").first.evaluate("e => getComputedStyle(e).transitionDuration")
         assert all(float(v.strip().removesuffix('s')) < .001 for v in duration.split(',')), duration
-        assert await page.evaluate("""async () => {
-          const dots = document.createElement('div'); dots.className = 'vd-dots';
+        assert await page.evaluate("""() => {
+          const dots = document.createElement('div'); dots.className = 'vd-dots'; dots.id = 'motion-check';
           dots.innerHTML = '<span></span><span></span><span></span>'; document.body.append(dots);
-          const styles = [...dots.children].map(e => getComputedStyle(e));
-          const reduced = styles.every(s => s.animationIterationCount === '1' && s.animationDelay === '0s');
-          await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-          const stopped = dots.getAnimations({subtree:true}).every(a => a.playState === 'finished');
-          dots.remove(); return reduced && stopped;
+          return [...dots.children].every(e => {
+            const style = getComputedStyle(e);
+            return style.animationIterationCount === '1' && style.animationDelay === '0s';
+          });
         }"""), "Reduced motion left the working indicator looping"
+        try:
+            await page.wait_for_function("""() =>
+              document.querySelector('#motion-check').getAnimations({subtree:true})
+                .every(animation => animation.playState === 'finished')
+            """, timeout=3000)
+        finally:
+            await page.locator("#motion-check").evaluate("element => element.remove()")
         await page.set_viewport_size({"width": 1000, "height": 760})
         await page.screenshot(path=str(artifacts / "settings-compact.png"))
         assert await page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Horizontal overflow"
