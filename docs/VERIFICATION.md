@@ -1,6 +1,6 @@
 # Verification
 
-Version 1.0.0, checked October 16, 2026. Automated tests use temporary profiles, databases, and loopback model fixtures. They do not spend subscription or API tokens.
+Version 1.1.0, checked October 21, 2026. Automated tests use temporary profiles, databases, and loopback model fixtures. They do not spend subscription or API tokens.
 
 | Check | Fedora 44 | Debian 12 |
 | --- | --- | --- |

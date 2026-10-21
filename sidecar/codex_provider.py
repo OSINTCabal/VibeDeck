@@ -32,7 +32,7 @@ class CodexClient(VibeAppServer):
             cwd=self.cwd, limit=64 * 1024 * 1024)
         self._reader_task = asyncio.create_task(self._read_loop())
         try:
-            await self.call("initialize", {"clientInfo": {"name": "vibedeck", "version": "1.0.0"},
+            await self.call("initialize", {"clientInfo": {"name": "vibedeck", "version": "1.1.0"},
                                            "capabilities": {"experimentalApi": True}})
             self._send_raw({"method": "initialized", "params": {}})
         except BaseException:

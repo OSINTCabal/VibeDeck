@@ -79,7 +79,7 @@ async def run():
         api_calls.append(path)
         payload = {}
         if path == "/api/health":
-            payload = {"ok": True, "api_key": True, "app_server": True, "vibe_cli": True, "default_model": "mistral-large-4", "default_agent": "accept-edits", "user": "test", "version": "1.0.0"}
+            payload = {"ok": True, "api_key": True, "app_server": True, "vibe_cli": True, "default_model": "mistral-large-4", "default_agent": "accept-edits", "user": "test", "version": "1.1.0"}
         elif path == "/api/codex/account":
             payload = {"installed": True, "connected": True, "type": "chatgpt", "plan": "plus"}
         elif path == "/api/providers":

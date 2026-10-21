@@ -540,7 +540,7 @@ async def health() -> dict:
         "api_key_source": kstat["source"],
         "default_model": DEFAULT_MODEL,
         "default_agent": DEFAULT_AGENT,
-        "version": "1.0.0",
+        "version": "1.1.0",
         "user": getpass.getuser(),
     }
 

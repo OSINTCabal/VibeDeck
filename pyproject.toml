@@ -1,6 +1,6 @@
 [project]
 name = "vibedeck"
-version = "1.0.0"
+version = "1.1.0"
 description = "VibeDeck — Mistral Vibe desktop harness + Studio (local control plane)"
 requires-python = ">=3.11"
 dependencies = [

@@ -153,7 +153,7 @@ class VibeAppServer:
         # raises "Client does not support approval callbacks" and kills the process
         # when an approval is requested.
         init = await self.call("initialize", {
-            "clientInfo": {"name": "vibedeck", "version": "1.0.0"},
+            "clientInfo": {"name": "vibedeck", "version": "1.1.0"},
             "capabilities": {"callbackKinds": ["approval", "user_input"]},
         })
         self.server_version = (init.get("serverInfo") or {}).get("version")

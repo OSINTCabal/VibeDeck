@@ -2,7 +2,7 @@
 
 **Created by OSINTCabal**
 
-Version **1.0.0**, the first release.
+Version **1.1.0**.
 
 A Mistral Vibe desktop app for **Fedora and Debian Linux**. Chat, write code, and pick up your coding sessions in the Vibe CLI. Mistral is the default provider.
 
