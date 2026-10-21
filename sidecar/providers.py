@@ -68,10 +68,15 @@ PRESETS = [
     {"name": "ollama", "label": "Ollama (local)", "api_base": "http://127.0.0.1:11434/v1", "api_style": "openai", "api_key_env_var": "", "help": "Start Ollama and enter the name of a pulled model. Main-agent delegation requires a model that supports tools. Text-only models can still be workers."},
 ]
 MANAGED_AGENT = "# Managed by VibeDeck: provider subagent\n"
+PLAN_PROFILE = ('display_name = "Plan"\n'
+                'description = "Read and plan without editing"\n'
+                'safety = "safe"\n'
+                'instructions = "Inspect the project and provide a plan. Do not change files."\n'
+                'enabled_tools = ["read_file", "grep"]\n')
 
 
 def sync_subagents(path: Optional[Path] = None, settings: AgentSettings | None = None) -> None:
-    """Install a shared MCP tool; Vibe 2.26 ignores custom tools/child models."""
+    """Install the shared MCP tool and the read-only Plan mode profile."""
     path = path or vibe_config_path()
     tools = path.parent / "vibedeck"
     tools.mkdir(parents=True, exist_ok=True)
@@ -128,6 +133,22 @@ def sync_subagents(path: Optional[Path] = None, settings: AgentSettings | None =
     else:
         managed.update(server)
     _write_document(path, original, document)
+    # Vibe 3 removed its built-in plan agent; preserve an existing user profile.
+    plan = path.parent / "agents/plan.toml"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    if not plan.exists():
+        fd, temporary = tempfile.mkstemp(prefix=".plan-", dir=plan.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                stream.write(PLAN_PROFILE)
+                stream.flush()
+                os.fsync(stream.fileno())
+            try:
+                os.link(temporary, plan)
+            except FileExistsError:
+                pass
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     sync_instructions(path.parent, settings)
     legacy_tool = path.parent / "tools/provider_task.py"
     if _read_text(legacy_tool).startswith(marker):

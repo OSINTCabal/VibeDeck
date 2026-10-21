@@ -72,6 +72,8 @@ provider = "local"
 input_price = 0.0
 output_price = 0.0
 ''')
+        import providers
+        providers.sync_subagents(home / "config.toml")
         # Native Vibe reads these values in its subprocess, never the user's auth.
         for name in list(os.environ):
             if name.startswith("VIBE_") or name in ("MISTRAL_API_KEY", "MISTRAL_ADMIN_API_KEY"):
@@ -82,6 +84,9 @@ output_price = 0.0
             await bridge.start()
             await bridge.start_session()
             sid = bridge.session_id
+            await bridge.set_agent(sid, "plan")
+            assert (await bridge.read_session(sid))["state"]["session"]["agent"]["name"] == "plan"
+            await bridge.set_agent(sid, "ask")
             await bridge.set_model(sid, "local")
             import vibedeck_server as desktop
             desktop.store.upsert_session(sid, cwd=str(home), model="local", agent="ask", status="idle")
@@ -102,7 +107,6 @@ output_price = 0.0
             history = state["history"]
             assert "LOCAL_INTEROP_OK" in json.dumps(history), history
             await desktop._read_vibe_models()
-            import providers
             providers.upsert_model({"name": "local", "alias": "local-alt", "provider": "local"}, home / "config.toml")
             assert "local-alt" in {m["id"] for m in await desktop._read_vibe_models()}
             updated = await desktop.patch_session(sid, desktop.SessionPatch(model="local-alt"))

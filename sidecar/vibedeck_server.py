@@ -970,12 +970,7 @@ async def _fetch_agents(refresh: bool = False) -> list[dict]:
 
 
 async def _known_agent_names() -> set[str]:
-    """Every agent name a session may run as (modes + subagent profiles).
-
-    ``agents/list`` hides plan mode from the picker (Unified Harness
-    projection) even though ``session/agent/update`` accepts it, so the
-    built-in modes are always included.
-    """
+    """Every agent name a session may run as (modes + subagent profiles)."""
     names = set(AGENT_MODES)
     try:
         for a in await _read_agents():

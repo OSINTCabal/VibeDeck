@@ -17,7 +17,7 @@ import type { ApiKeyStatus } from "@/lib/types";
 
 const AGENTS = [
   { value: "ask", label: "ask — asks permission for actions that need approval" },
-  { value: "plan", label: "plan — plans without executing tools" },
+  { value: "plan", label: "plan — reads files and plans without editing" },
   { value: "accept-edits", label: "accept-edits — edits files freely, asks for risky commands" },
   { value: "auto-approve", label: "Full auto — approves all tool actions automatically" },
 ];

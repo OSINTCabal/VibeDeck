@@ -3,7 +3,7 @@
 Spawns ``vibe-app-server`` (the JSON-RPC server that ships with the Vibe CLI and
 powers Vibe Code Web) as a subprocess and speaks its wire protocol over stdio.
 
-Wire contract (verified against vibe 2.26.0):
+Wire contract (verified against vibe 2.26.0 and 3.0.1):
   * JSON-RPC 2.0, one message per line, on stdin/stdout. stderr is logs.
   * Field names are camelCase on the wire (pydantic ``to_camel`` alias generator,
     ``extra="forbid"``). Send exact camelCase keys.
@@ -39,7 +39,7 @@ from typing import Any, Optional
 DEFAULT_MODEL = "mistral-large-4"
 DEFAULT_AGENT = "accept-edits"
 
-# Built-in vibe agent modes (approval posture).
+# Desktop agent modes; Plan is installed as a read-only profile on Vibe 3.
 AGENT_MODES = ("ask", "plan", "accept-edits", "auto-approve")
 
 # Reasoning / thinking levels accepted by config/model/write.

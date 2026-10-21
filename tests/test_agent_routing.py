@@ -115,6 +115,12 @@ def test_desktop_path_without_local_bin(tmp_path,monkeypatch):
     cfg=tmp_path/'config.toml'
     providers.sync_subagents(cfg)
     assert tomllib.loads(cfg.read_text())['mcp_servers'][0]['command']=='/test/native/python'
+    plan = tmp_path/'agents/plan.toml'
+    assert tomllib.loads(plan.read_text())['enabled_tools'] == ['read_file', 'grep']
+    assert plan.stat().st_mode & 0o777 == 0o600
+    plan.write_text('display_name = "My Plan"\n')
+    providers.sync_subagents(cfg)
+    assert plan.read_text() == 'display_name = "My Plan"\n'
 
 
 @pytest.mark.asyncio

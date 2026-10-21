@@ -92,7 +92,7 @@ async def repo_agent(selected, job: AgentJob) -> dict:
     env.update(VIBE_ACTIVE_MODEL=selected.alias, VIBE_MODELS=json.dumps([selected.model_dump(exclude_none=True)]),
                VIBE_API_RETRY_MAX_ELAPSED_TIME="0")
     tools = ["read_file", "grep"] + (["write_file", "edit"] if job.access == "edit" else [])
-    args = [cli, "--trust", "--agent", "accept-edits" if job.access == "edit" else "plan",
+    args = [cli, "--trust", "--agent", "accept-edits" if job.access == "edit" else "ask",
             "--prompt", "--max-turns", "6", "--max-tokens", "24000", "--output", "json"]
     for tool in tools:
         args.extend(["--enabled-tools", tool])
