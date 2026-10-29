@@ -4,7 +4,7 @@
 
 Version **1.1.0**.
 
-A Mistral Vibe desktop app for **Fedora and Debian Linux**. Chat, write code, and pick up your coding sessions in the Vibe CLI. Mistral is the default provider.
+A Mistral Vibe desktop app for **Fedora and Debian Linux**. Chat, write code, and pick up your coding sessions in the Vibe CLI. Mistral is the default provider. VibeDeck is part of my desktop app series alongside [GrokDeck](https://github.com/OSINTCabal/GrokDeck), [KimiDeck](https://github.com/OSINTCabal/KimiDeck), and [MinimaxDeck](https://github.com/OSINTCabal/MinimaxDeck).
 
 [Install](docs/INSTALL.md) · [Development](docs/DEVELOPMENT.md) · [Verification](docs/VERIFICATION.md)
 
@@ -84,6 +84,7 @@ Screenshots use isolated sample workspaces. See [more screenshots](docs/screensh
 
 ## Notes
 
+- VibeDeck is released under the [MIT license](LICENSE).
 - The bottom-left account menu handles browser sign-in, account switching, and sign-out. CLI credentials and API keys are separate.
 - **Connect services** completes web connector authorization through the browser. Local MCP servers share the CLI configuration; they are not automatically registered as web connectors.
 - Local chats and files are not automatically uploaded to the web workspace. API tools use API billing, separate from your Vibe subscription. Viewing usage or local connectors makes no model requests.

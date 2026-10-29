@@ -63,7 +63,7 @@ Workspace tests check pagination, safe metadata, credential redaction, validatio
 
 ## Before publishing
 
-Choose a license before making the repository public. Review the README screenshots and run the checks above, then scan the history with `gitleaks git --redact --log-opts=--all .`.
+The integration source is released under the MIT license. Review the README screenshots and run the checks above, then scan the history with `gitleaks git --redact --log-opts=--all .`.
 
 The repository is `https://github.com/OSINTCabal/VibeDeck`. Check `git remote -v` before pushing. Release tags use `vMAJOR.MINOR.PATCH`, starting at `v1.0.0`.
 

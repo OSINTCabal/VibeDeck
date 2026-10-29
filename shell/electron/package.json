@@ -12,6 +12,6 @@
   "private": true,
   "engines": { "node": ">=22.12" },
   "dependencies": {
-    "electron": "^44.6.0"
+    "electron": "^44.9.1"
   }
 }
