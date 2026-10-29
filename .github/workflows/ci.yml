@@ -5,19 +5,22 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   sidecar:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: .
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.1.0
         with:
           python-version: "3.12"
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v10.3.3
       - name: Create venv + install deps
         run: |
           uv venv .venv --python 3.12
@@ -30,16 +33,17 @@ jobs:
         run: .venv/bin/python -m pytest -q
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: pnpm/action-setup@v6.1.0
         with:
           version: 9.15.9
-      - uses: actions/setup-node@v4
+          cache: false
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: 22
           cache: pnpm
@@ -54,7 +58,7 @@ jobs:
         run: ./node_modules/.bin/vite build
 
   linux-native:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -71,8 +75,10 @@ jobs:
             dnf install -y --setopt=install_weak_deps=False --disablerepo=fedora-cisco-openh264 git curl ca-certificates python3 xz xorg-x11-server-Xvfb openbox \
               gtk3 nss alsa-lib mesa-libgbm at-spi2-atk libXScrnSaver libdrm libxkbcommon
           fi
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+        with:
+          cache-dependency-glob: pyproject.toml
       - name: Install native Vibe and sidecar
         run: |
           uv python install 3.14
