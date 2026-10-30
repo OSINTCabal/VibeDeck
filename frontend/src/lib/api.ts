@@ -119,7 +119,14 @@ export const getMcp = (sid?: string) =>
 export const getAgents = () => http<{ agents: AgentInfo[]; dir: string }>("/api/agents");
 export const getAudit = () => http<{ audit: { action: string; detail: string; ts: number }[] }>("/api/audit");
 export const getProjects = () =>
-  http<{ home: string; recent: { path: string; name: string; lastUsed: number }[]; known: { path: string; name: string }[] }>("/api/projects");
+  http<{ home: string; recent: { path: string; name: string; lastUsed: number; branch?: string | null }[];
+    known: { path: string; name: string }[]; repos?: { path: string; name: string; branch: string }[] }>("/api/projects");
+
+export interface GitBranches { root: string; current: string | null; branches: string[]; dirty: boolean | null }
+export const getGitBranches = (path: string) =>
+  http<GitBranches>(`/api/git/branches?path=${encodeURIComponent(path)}`);
+export const switchGitBranch = (path: string, branch: string, create = false) =>
+  http<GitBranches>("/api/git/switch", { method: "POST", body: JSON.stringify({ path, branch, create }) });
 
 export const getWorkspace = (kind: "connectors" | "libraries", signal?: AbortSignal) =>
   http<{ items: { id: string; name: string; description: string; connected?: boolean; documents?: number | null }[] }>(`/api/workspace/${kind}`, { signal });

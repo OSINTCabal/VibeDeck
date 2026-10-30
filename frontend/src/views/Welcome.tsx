@@ -7,6 +7,7 @@ import {
 import { Composer, type ImageAttachment } from "@/components/Composer";
 import { MistralLogo } from "@/components/Logo";
 import { ProjectPicker, rememberCwd } from "@/components/ProjectPicker";
+import { BranchPicker } from "@/components/BranchPicker";
 import { LANE_AGENT } from "@/hooks/useSessions";
 import { patchSession, sendTurn } from "@/lib/api";
 import type { Lane } from "@/lib/types";
@@ -134,7 +135,7 @@ export function Welcome() {
               onModelChange={setModel}
               agent={agent}
               onAgentChange={setAgent}
-              extraLeft={<ProjectPicker cwd={cwd} onChange={setCwd} />}
+              extraLeft={<><ProjectPicker cwd={cwd} onChange={setCwd} /><BranchPicker cwd={cwd} /></>}
               footer={error && pending.current ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-xs">
                   <button type="button" onClick={() => navigate(`/sessions/${pending.current!.id}`)} className="rounded-md border border-border px-2 py-1 hover:bg-surface-muted">Open created session</button>

@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
+import git_projects
 import httpx
 import providers as provider_config
 from agent_routing import AgentSettings
@@ -1629,11 +1630,76 @@ async def get_projects() -> dict:
         p = home / d
         if p.is_dir() and str(p) not in seen:
             known.append({"path": str(p), "name": p.name})
+    for r in recent:
+        r["branch"] = git_projects.head_branch(Path(r["path"]))
     return {
         "home": str(home),
         "recent": recent[:10],
         "known": known,
+        "repos": await _discover_repos(home, [r["path"] for r in recent]),
     }
+
+
+# Git repositories under home and next to recent projects. The walk is
+# time-boxed and cached briefly; branches are re-read on every request.
+_repo_cache: tuple[float, tuple, list[dict]] | None = None
+
+
+def _vibe_trusted_folders() -> list[str]:
+    """Folders the Vibe CLI was trusted in — where the user actually codes."""
+    try:
+        path = provider_config.vibe_config_path().parent / "trusted_folders.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [p for p in data.get("trusted", []) if isinstance(p, str)]
+
+
+async def _discover_repos(home: Path, recent: list[str]) -> list[dict]:
+    global _repo_cache
+    roots: list[tuple[Path, int]] = [(home, 3)]
+    for path in [*recent, *_vibe_trusted_folders()]:
+        # siblings and cousins of places the user worked in (e.g. /mnt/disk/Projects/*)
+        for ancestor in list(Path(path).parents)[:2]:
+            if ancestor != home and home not in ancestor.parents and len(ancestor.parts) > 2 and ancestor.is_dir():
+                roots.append((ancestor, 2))
+    key = tuple(str(r) for r, _ in roots)
+    if _repo_cache and _repo_cache[1] == key and time.monotonic() - _repo_cache[0] < 120:
+        repos = _repo_cache[2]
+    else:
+        repos = await asyncio.to_thread(git_projects.find_repos, roots)
+        _repo_cache = (time.monotonic(), key, repos)
+    return [{**r, "branch": git_projects.head_branch(Path(r["path"])) or r["branch"]} for r in repos]
+
+
+class GitSwitchReq(BaseModel):
+    path: str
+    branch: str
+    create: StrictBool = False
+
+
+@app.get("/api/git/branches")
+async def git_branches(path: str = Query(..., min_length=1)) -> dict:
+    target = Path(path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    info = await asyncio.to_thread(git_projects.branches, target)
+    if info is None:
+        raise HTTPException(404, "not a git repository")
+    return info
+
+
+@app.post("/api/git/switch")
+async def git_switch(r: GitSwitchReq) -> dict:
+    target = Path(r.path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    try:
+        return await asyncio.to_thread(git_projects.switch, target, r.branch, r.create)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
 
 
 # ---- direct API chat (Chat lane)
