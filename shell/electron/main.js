@@ -11,6 +11,9 @@ const { app, BrowserWindow, ipcMain, screen, dialog, session, shell } = require(
 const path = require("path");
 const fs = require("node:fs/promises");
 if (process.platform === "linux") app.setDesktopName("vibedeck.desktop");
+// One VibeDeck per user: relaunching (e.g. from the app drawer while hidden in
+// the tray) brings the existing window back instead of opening a second shell.
+if (!app.requestSingleInstanceLock()) app.exit(0);
 const ZOOM_FACTORS = [0.75, 0.9, 1, 1.1, 1.25, 1.5];
 let zoomFactor = 1;
 
@@ -18,7 +21,13 @@ const PORT = process.env.VIBEDECK_PORT || "9377";
 const URL = process.env.VIBEDECK_URL || `http://127.0.0.1:${PORT}`;
 
 let win = null;
+let pendingRoute = null;
 const usage = require("./usage");
+const desktop = require("./desktop").createDesktop({
+  getWindow: () => win,
+  showWindow,
+  navigate: route => { showWindow(); sendRoute(route); },
+});
 const workspace = require("./workspace").createWorkspace(() => win);
 const APP_ORIGIN = new global.URL(URL).origin;
 function trustedSender(event) {
@@ -79,7 +88,10 @@ function createWindow() {
     },
   });
 
-  win.webContents.on("did-finish-load", () => win?.webContents.setZoomFactor(zoomFactor));
+  win.webContents.on("did-finish-load", () => {
+    win?.webContents.setZoomFactor(zoomFactor);
+    if (pendingRoute) { const route = pendingRoute; pendingRoute = null; sendRoute(route); }
+  });
   win.once("ready-to-show", () => win.show());
 
   // The launcher starts the sidecar first, but retry briefly so a slow boot
@@ -110,7 +122,25 @@ function createWindow() {
     win.on(ev, pushState);
   }
 
+  // In "keep running" mode the close button hides the window to the tray.
+  win.on("close", event => {
+    if (stopping || !desktop.keepRunning()) return;
+    event.preventDefault();
+    win.hide();
+  });
   win.on("closed", () => { workspace.close(); win = null; });
+}
+
+function showWindow() {
+  if (!win || win.isDestroyed()) { createWindow(); return; }
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function sendRoute(route) {
+  if (!win || win.isDestroyed() || win.webContents.isLoading()) { pendingRoute = route; return; }
+  win.webContents.send("app:navigate", route);
 }
 
 handle("window:minimize", () => { if (win) win.minimize(); });
@@ -120,6 +150,9 @@ handle("window:toggle-maximize", () => {
 });
 handle("window:close", () => { if (win) win.close(); });
 handle("window:state", () => windowState());
+handle("desktop:get", () => desktop.get());
+handle("desktop:set", patch => desktop.update(patch).then(() => desktop.get()));
+handle("tray:set-usage", value => desktop.setUsage(value));
 
 // Native "choose a project directory" dialog for the composer's project chip.
 // Returns the selected path, or null when the user cancels.
@@ -159,6 +192,8 @@ handle("workspace:resize", bounds => workspace.resize(bounds));
 handle("workspace:close", () => workspace.close());
 handle("workspace:signin", (destination = "work") => connectAccount(destination));
 handle("workspace:connectors", () => connectAccount("connectors"));
+handle("cloud:read", (procedure, params) => workspace.readCode(procedure, params));
+handle("cloud:write", (procedure, params) => workspace.writeCode(procedure, params));
 
 handle("window:get-zoom", () => zoomFactor);
 handle("window:set-zoom", async factor => {
@@ -174,19 +209,21 @@ app.whenReady().then(async () => {
     const saved = JSON.parse(await fs.readFile(path.join(app.getPath("userData"), "display.json"), "utf8"));
     if (ZOOM_FACTORS.includes(saved.zoomFactor)) zoomFactor = saved.zoomFactor;
   } catch { /* Missing or invalid display preferences use 100%. */ }
+  await desktop.load();
   await prepareSession();
   createWindow();
+  desktop.start();
 });
 
-app.on("window-all-closed", () => app.quit());
+app.on("second-instance", () => { if (app.isReady()) showWindow(); });
+app.on("window-all-closed", () => { if (!desktop.keepRunning()) app.quit(); });
 let stopping = false;
 app.on("before-quit", event => {
   if (stopping) return;
   event.preventDefault();
   stopping = true;
   workspace.close();
+  desktop.destroy();
   usage.shutdown().catch(() => {}).finally(() => app.quit());
 });
-app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
-});
+app.on("activate", () => showWindow());

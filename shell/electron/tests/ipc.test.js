@@ -8,11 +8,11 @@ test('usage IPC rejects remote callers and preserves workspace when sign-in is c
   let reads = 0, resets = 0, focused = 0;
   const usage = { read: () => { reads++; return { status: 'ready' }; }, connect() {}, disconnect() {} };
   const electron = { ipcMain: { handle: (name, fn) => handlers.set(name, fn) },
-    app: { setDesktopName(name) {assert.equal(name,'vibedeck.desktop');}, whenReady: () => ({ then() {} }), on() {} } };
+    app: { setDesktopName(name) {assert.equal(name,'vibedeck.desktop');}, requestSingleInstanceLock: () => true, whenReady: () => ({ then() {} }), on() {} } };
   const moduleObject = { exports: {} };
   const source = fs.readFileSync(require.resolve('../main'), 'utf8');
   new Function('require', 'module', '__dirname', source + '\nmodule.exports = value => { win = value; };')(
-    name => name === 'electron' ? electron : name === './usage' ? usage : name === './workspace' ? { createWorkspace: () => ({ open() {}, resize() {}, close() {}, reset() { resets++; } }) } : require(name), moduleObject, path.join(__dirname, '..'));
+    name => name === 'electron' ? electron : name === './usage' ? usage : name === './desktop' ? { createDesktop: () => ({ get: () => ({ closeToTray: false, tray: true }), update: async () => {}, setUsage() {}, keepRunning: () => false }) } : name === './workspace' ? { createWorkspace: () => ({ open() {}, resize() {}, close() {}, reset() { resets++; } }) } : require(name), moduleObject, path.join(__dirname, '..'));
   const contents = {};
   moduleObject.exports({ webContents: contents, isDestroyed: () => false, focus: () => {focused++;} });
   const origin = new URL(process.env.VIBEDECK_URL || `http://127.0.0.1:${process.env.VIBEDECK_PORT || 9377}`).origin;
@@ -22,7 +22,7 @@ test('usage IPC rejects remote callers and preserves workspace when sign-in is c
   assert.throws(() => read({ sender: {}, senderFrame: { origin } }, 2026, 10), /Untrusted/);
   assert.throws(() => read({ sender: contents, senderFrame: null }, 2026, 10), /Untrusted/);
   assert.equal(reads, 1);
-  for (const name of ['workspace:open', 'workspace:resize', 'workspace:close', 'workspace:signin', 'workspace:connectors', 'usage:confirm-signin', 'usage:account', 'workspace:refresh', 'window:get-zoom', 'window:set-zoom']) {
+  for (const name of ['workspace:open', 'workspace:resize', 'workspace:close', 'workspace:signin', 'workspace:connectors', 'usage:confirm-signin', 'usage:account', 'workspace:refresh', 'window:get-zoom', 'window:set-zoom', 'desktop:get', 'desktop:set', 'tray:set-usage']) {
     assert.throws(() => handlers.get(name)({ sender: contents, senderFrame: { origin: 'https://chat.mistral.ai' } }), /Untrusted/);
     assert.throws(() => handlers.get(name)({ sender: {}, senderFrame: { origin } }), /Untrusted/);
   }

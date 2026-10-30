@@ -54,6 +54,8 @@ async def run():
     shared_skills = False
     agent_settings = {"policy":"requested","quality":"balanced","max_workers":2}
     agent_saves = []
+    # polls left before the fixture's cloud turn ends; a sent prompt runs until Stop
+    cloud_writes, cloud_turn = [], {"polls": 0}
     agent_settings_corrupt = False
     skills_rows = []
     provider_rows = [{"name": "mistral", "apiBase": "https://api.mistral.ai/v1", "apiStyle": "openai", "backend": "mistral", "apiKeyEnvVar": "MISTRAL_API_KEY", "builtin": True, "key": {"present": True, "source": "keyring"}, "models": [{"alias": "mistral-large-4", "name": "mistral-large-4", "provider": "mistral"}]}]
@@ -160,8 +162,56 @@ async def run():
             else:
                 payload = {"items": [{"id": "library", "name": "Research library", "description": "Shared references", "documents": 3}] +
                            [{"id": "created-library", **entry, "documents": 0} for entry in library_saves]}
+        elif path == "/api/git/branches":
+            payload = {"current": "main", "branches": ["main"], "dirty": False, "isRepo": True}
         elif path == "/api/projects":
             payload = {"home": "/tmp", "known": [{"name": "Example project", "path": "/tmp/example"}], "recent": []}
+        elif path.startswith("/api/cloud/"):
+            body = request.post_data_json
+            raw = json.loads(body["text"]) if body["status"] == 200 else None
+            if raw is None:
+                payload = {"error": {"code": "signed_out", "message": "Sign in to Mistral to see your Vibe Code Web sessions."}}
+            elif path == "/api/cloud/projects":
+                payload = {"nextCursor": None, "projects": [
+                    {"id": "p-local", "name": "example", "url": "https://chat.mistral.ai/code/p-local", "repos": [], "localPath": "/tmp/example"},
+                    {"id": "p-cloud", "name": "dual-my-sense", "url": "https://chat.mistral.ai/code/p-cloud", "repos": [], "localPath": None}]}
+            elif path == "/api/cloud/sessions":
+                project = body["projectId"]
+                assert raw == {"procedure": "sessions.list", "params": {"projectId": project}}, raw
+                title = "Matched cloud session" if project == "p-local" else "Оновлення інтерфейсу"
+                payload = {"nextCursor": None, "sessions": [{"id": "s-" + project[2:], "projectId": project, "title": title, "status": "blocked",
+                           "url": f"https://chat.mistral.ai/code/{project}/s-{project[2:]}", "createdAt": time.time(), "updatedAt": time.time(), "unseen": False, "pinned": False}]}
+            elif path == "/api/cloud/session":
+                assert raw == {"procedure": "sessions.byId", "params": {"sessionId": "s-cloud"}}, raw
+                active = cloud_turn["polls"] > 0
+                if active and cloud_turn["polls"] < 1000:
+                    cloud_turn["polls"] -= 1
+                payload = {"session": {"id": "s-cloud", "status": "active" if active else "blocked",
+                                       "waitKind": None, "title": "Оновлення інтерфейсу", "active": active}}
+            elif path == "/api/cloud/result":
+                cloud_writes.append(raw)
+                cloud_turn["polls"] = {"sessions.sendMessage": 1000, "sessions.respondCallback": 1}.get(raw["procedure"], 0)
+                payload = {"ok": True}
+            else:
+                assert raw == {"procedure": "sessions.messages", "params": {"sessionId": body["sessionId"]}}, raw
+                procedures = [w["procedure"] for w in cloud_writes]
+                cloud_question = [] if "sessions.respondCallback" in procedures else [
+                    {"id": "c5", "type": "callback", "callbackId": "cb-theme", "title": "Question", "state": {"status": "open"},
+                     "detail": {"kind": "user_input", "cloudCallback": "ask_user_question",
+                                "request": {"questions": [{"question": "Which theme?", "hideOther": False, "options": [{"label": "Dark"}, {"label": "Light"}]}]}},
+                     "createdAt": 1, "updatedAt": 1}]
+                follow_up = [
+                    {"id": "c6", "type": "message", "role": "user", "content": [{"type": "text", "text": w["params"]["text"]}], "createdAt": 1, "updatedAt": 1}
+                    for w in cloud_writes if w["procedure"] == "sessions.sendMessage"]
+                if follow_up:
+                    follow_up.append({"id": "c7", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud follow-up"}], "createdAt": 1, "updatedAt": 1})
+                payload = {"nextCursor": None, "entries": [
+                    {"id": "c1", "type": "message", "role": "user", "content": [{"type": "text", "text": "Онови інтерфейс"}], "createdAt": 1, "updatedAt": 1},
+                    {"id": "c2", "type": "reasoning", "text": "Cloud reasoning", "createdAt": 1793385883244, "updatedAt": 1793385885244},
+                    {"id": "c3", "type": "effect", "title": "bash", "detail": {"toolName": "bash", "input": {"command": "ls"}, "display": {"summary": "ls"}},
+                     "state": {"status": "completed", "outputText": "src"}, "createdAt": 1, "updatedAt": 1},
+                    {"id": "c4", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud reply"}], "createdAt": 1, "updatedAt": 1},
+                    *cloud_question, *follow_up]}
         elif path == "/api/usage":
             payload = {"status": "partial", "source": "admin", "account": {"plan": "Pro", "status": "ready"}, "allowances": [], "billing": None,
                        "local": {"rows": [], "observedSince": None, "historicalTotals": {"estimated_cost_usd": 0}}}
@@ -209,7 +259,11 @@ async def run():
         context = await browser.new_context(viewport={"width": 1440, "height": 900})
         await context.route("**/*", route)
         await context.add_init_script('''window.usageConnected = false; window.usagePercent = 25;
-window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
+Object.defineProperty(window, "cloudSignedIn", { get: () => localStorage.getItem("fixture.cloud-signed-out") !== "1",
+  set: value => localStorage.setItem("fixture.cloud-signed-out", value ? "0" : "1") }); window.cloudReads = [];
+window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) => { window.cloudReads.push(procedure);
+  return window.cloudSignedIn ? { status: 200, text: JSON.stringify({ procedure, params }) } : { status: 401, text: "" }; },
+  write: async (procedure, params) => ({ status: 200, text: JSON.stringify({ procedure, params }) }) }, getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
  account: async () => ({remembered:window.usageConnected}),
  connect: async () => { window.usageConnected = true; window.dispatchEvent(new Event('focus')); return true; },
  disconnect: async () => { if (window.failDisconnect) throw new Error('Fixture disconnect failed'); window.usageConnected = false; },
@@ -241,7 +295,7 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.get_by_role("button", name="Account", exact=True).click()
         await page.get_by_role("button", name="Mistral account", exact=True).click()
         account_dialog = page.get_by_role("dialog", name="Mistral account", exact=True)
-        assert await account_dialog.evaluate("e => getComputedStyle(e).animationName") == "vd-reveal"
+        assert await account_dialog.evaluate("e => getComputedStyle(e).animationName") == "vd-menu-in"
         await account_dialog.get_by_role("button", name="Sign in to Mistral", exact=True).click()
         await expect(account_dialog).not_to_be_visible()
         await page.get_by_role("button", name="Account", exact=True).click()
@@ -635,9 +689,32 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.goto(base)
         await page.get_by_role("button", name="Code", exact=True).click()
         await expect(page.get_by_role("button", name="Select agent", exact=True)).to_contain_text("Plan")
+        # Menus keep rows apart when a short window caps their height, and the
+        # composer toolbar fits a phone-width window.
+        await page.set_viewport_size({"width": 1000, "height": 520})
+        await page.get_by_role("button", name="Select agent", exact=True).click()
+        rows = page.get_by_role("menu").get_by_role("menuitemradio")
+        await expect(rows.first).to_be_visible()
+        await page.get_by_role("menu").evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
+        boxes = [await row.bounding_box() for row in await rows.all()]
+        assert all(a["y"] + a["height"] <= b["y"] + .5 for a, b in zip(boxes, boxes[1:])), ("Overlapping menu rows", boxes)
+        await page.keyboard.press("Escape")
+        await page.get_by_role("button", name="Select model", exact=True).click()
+        # the agent menu may still be animating closed beside the new one
+        model_menu = page.locator('[role="menu"][data-state="open"]')
+        await model_menu.evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
+        assert await model_menu.evaluate("m => [...m.querySelectorAll('div')].every(e => e.scrollWidth <= e.clientWidth + 1)"), "Model menu scrolls sideways"
+        await page.keyboard.press("Escape")
+        await page.screenshot(path=str(artifacts / "agent-menu-short.png"))
+        await page.set_viewport_size({"width": 420, "height": 820})
+        await page.locator("aside").first.evaluate("e => Promise.all(e.getAnimations().map(a => a.finished)).then(() => new Promise(r => setTimeout(r, 250)))")
+        await page.screenshot(path=str(artifacts / "composer-narrow.png"))
+        toolbar = await page.locator("[data-vd-composer]").evaluate("e => { const bar = e.parentElement.lastElementChild; return [bar.scrollWidth, bar.clientWidth, bar.getBoundingClientRect().right, innerWidth]; }")
+        assert toolbar[0] <= toolbar[1] + 1 and toolbar[2] <= toolbar[3], ("Composer toolbar overflows", toolbar)
+        await page.set_viewport_size({"width": 1440, "height": 900})
         for mode in ("Full auto","Accept edits","Ask","Plan"):
             await page.get_by_role("button",name="Select agent",exact=True).click()
-            await page.get_by_role("button",name=mode,exact=True).click()
+            await page.get_by_role("menuitemradio",name=mode,exact=True).click()
             await expect(page.get_by_role("button",name="Select agent",exact=True)).to_contain_text(mode)
 
         await page.goto(base + "/settings")
@@ -674,18 +751,18 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await expect(page.get_by_role("alert")).to_contain_text("Fixture first message failed")
         await expect(page.get_by_role("button", name="Remove pixel.png", exact=True)).to_be_visible()
         await page.get_by_role("button", name="Select model", exact=True).click()
-        await page.get_by_role("button", name="audit-b", exact=False).click()
+        await page.get_by_role("menuitemradio", name="audit-b", exact=False).click()
         await page.get_by_role("button", name="Select agent", exact=True).click()
-        await page.get_by_role("button", name="Plan", exact=True).click()
+        await page.get_by_role("menuitemradio", name="Plan", exact=True).click()
         await page.get_by_role("button", name="Send", exact=True).click()
         await expect(page.get_by_role("alert")).to_contain_text("Fixture first message failed")
         assert len(session_creations) == 1 and len(turn_attempts) == 2
-        assert session_patches == [{"agent": "plan", "model": "audit-b"}]
+        assert session_patches == [{"agent": "plan", "model": "audit-b", "reasoning": None}], session_patches
         assert turn_attempts[0]["requestId"] == turn_attempts[1]["requestId"]
         assert turn_attempts[0]["images"] == turn_attempts[1]["images"]
         sessions[-1]["status"] = "unknown"
         await page.get_by_role("button", name="Select agent", exact=True).click()
-        await page.get_by_role("button", name="Ask", exact=True).click()
+        await page.get_by_role("menuitemradio", name="Ask", exact=True).click()
         await page.get_by_role("button", name="Send", exact=True).click()
         await expect(page.get_by_role("alert")).to_contain_text("become idle")
         assert len(turn_attempts) == 2
@@ -758,6 +835,60 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.get_by_role("link", name="Agents", exact=True).click()
         await expect(page.get_by_role("heading", name="Agents", exact=True)).to_be_visible()
         await expect(page.get_by_text("ask", exact=True).first).to_be_visible()
+        # Vibe Code Web sessions nest under the matching local project or their
+        # own cloud project, and open with their open questions, a reply box and Stop.
+        await page.set_viewport_size({"width": 1440, "height": 900})
+        await page.goto(base)
+        await page.get_by_role("button", name="Code", exact=True).click()
+        sidebar = page.locator("aside")
+        await expect(sidebar.get_by_role("link", name="Matched cloud session", exact=False)).to_be_visible()
+        cloud_project = sidebar.get_by_role("button", name="dual-my-sense", exact=False)
+        await expect(cloud_project).to_have_attribute("aria-expanded", "true")
+        await sidebar.get_by_role("link", name="Оновлення інтерфейсу", exact=False).click()
+        await expect(page).to_have_url(base + "/cloud/p-cloud/s-cloud")
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await expect(page.get_by_role("button", name="Thought for 2s", exact=True)).to_be_visible()
+        await expect(page.get_by_role("link", name="Open on chat.mistral.ai", exact=True)).to_have_attribute("href", "https://chat.mistral.ai/code/p-cloud/s-cloud")
+        await expect(page.locator("[data-vd-composer]")).to_have_count(0)
+        await page.get_by_role("radio", name="Dark", exact=True).check()
+        await page.screenshot(path=str(artifacts / "cloud-session.png"))
+        await page.get_by_role("button", name="Submit answers", exact=True).click()
+        await expect(page.get_by_text("Vibe needs your input", exact=True)).to_have_count(0)
+        assert cloud_writes[-1] == {"procedure": "sessions.respondCallback", "params": {"sessionId": "s-cloud", "callbackId": "cb-theme",
+            "result": {"canceled": False, "answers": [{"question": "Which theme?", "answer": "Dark", "selected": ["Dark"]}]}}}, cloud_writes
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_have_count(0)
+        reply = page.get_by_role("textbox", name="Reply to this cloud session", exact=True)
+        await reply.fill("Add a light theme too")
+        await reply.press("Enter")
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_be_visible()
+        sent = cloud_writes[-1]
+        assert sent["procedure"] == "sessions.sendMessage" and sent["params"]["text"] == "Add a light theme too", sent
+        assert len(sent["params"]["idempotencyKey"]) == 36, sent
+        await expect(page.get_by_text("Add a light theme too", exact=True)).to_have_count(1)
+        await page.screenshot(path=str(artifacts / "cloud-session-running.png"))
+        await page.get_by_role("button", name="Stop", exact=True).click()
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_have_count(0)
+        assert cloud_writes[-1] == {"procedure": "sessions.interrupt", "params": {"sessionId": "s-cloud"}}, cloud_writes
+        await expect(page.get_by_text("Cloud follow-up", exact=True)).to_be_visible()
+        await expect(page.get_by_role("button", name="Send", exact=True)).to_be_disabled()
+        await cloud_project.click()
+        await expect(cloud_project).to_have_attribute("aria-expanded", "false")
+        await cloud_project.click()
+        await page.evaluate("window.cloudSignedIn = false")
+        await page.get_by_role("button", name="Refresh conversation", exact=True).click()
+        await expect(page.get_by_text("Sign in to Mistral to see your Vibe Code Web sessions.", exact=True)).to_be_visible()
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await page.reload()
+        await expect(page.get_by_role("button", name="Sign in to Mistral", exact=True)).to_be_visible()
+        await expect(sidebar.get_by_text("Sign in to Mistral to list your Vibe Code Web sessions.", exact=True)).to_be_visible()
+        await expect(sidebar.get_by_role("button", name="dual-my-sense", exact=False)).to_have_count(0)
+        await page.screenshot(path=str(artifacts / "cloud-signed-out.png"))
+        await page.evaluate("window.vibedeck.workspace = { signIn: async () => { window.cloudSignedIn = true; return true; } }")
+        await sidebar.get_by_role("button", name="Sign in", exact=True).click()
+        await expect(sidebar.get_by_role("button", name="dual-my-sense", exact=False)).to_be_visible()
+        await page.get_by_role("button", name="Sign in to Mistral", exact=True).click()
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await page.evaluate("delete window.vibedeck.workspace")
         await page.goto(base + "/settings")
         await page.emulate_media(reduced_motion="no-preference")
         frames = await page.evaluate("""async () => {
@@ -787,7 +918,7 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         assert not external, external
         await browser.close()
     server.shutdown()
-    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
+    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, cloud sessions, replies, answers, stop and sign-in, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
 
 
 if __name__ == "__main__":

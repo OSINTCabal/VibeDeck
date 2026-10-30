@@ -49,10 +49,14 @@ echo "==> Installing icon"
 for size in 16x16 32x32 48x48 128x128 256x256; do
   mkdir -p "$ICONS/$size/apps"
 done
-# Use the bundled icon if present, else fall back to a generated one.
+# Render each size from the SVG when rsvg-convert is available; else reuse the PNG.
 if [ -f "$SRC/packaging/vibedeck-icon.png" ]; then
   for size in 16x16 32x32 48x48 128x128 256x256; do
-    cp "$SRC/packaging/vibedeck-icon.png" "$ICONS/$size/apps/vibedeck.png"
+    if command -v rsvg-convert >/dev/null 2>&1 && [ -f "$SRC/packaging/vibedeck-icon.svg" ]; then
+      rsvg-convert -w "${size%x*}" -h "${size%x*}" "$SRC/packaging/vibedeck-icon.svg" -o "$ICONS/$size/apps/vibedeck.png"
+    else
+      cp "$SRC/packaging/vibedeck-icon.png" "$ICONS/$size/apps/vibedeck.png"
+    fi
   done
 fi
 if [ -f "$SRC/packaging/vibedeck-icon.svg" ]; then

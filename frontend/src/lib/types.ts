@@ -55,6 +55,9 @@ export interface VibeModelInfo {
   name: string;
   supportsImages: boolean;
   thinkingLevels: string[];
+  maxContextLength?: number | null;
+  autoCompactThreshold?: number | null;
+  thinking?: string | null;
 }
 
 export interface Health {
@@ -161,6 +164,9 @@ export interface ModelInfo {
   functionCalling: boolean;
   vision: boolean;
   ownedBy: string;
+  /** Reasoning levels the vibe CLI accepts for this model, and its default. */
+  thinkingLevels?: string[];
+  defaultThinking?: string | null;
 }
 
 export interface SkillInfo {
@@ -260,4 +266,25 @@ export interface UsageSnapshot {
   local?: { rows: { day: string; model: string | null; source: string; prompt_tokens: number;
     completion_tokens: number; cached_tokens: number; estimated_cost_usd: number }[];
     observedSince: number | null; historicalTotals: StudioCosts["total"] };
+}
+
+// ---- Vibe Code Web (cloud) sessions, read-only
+
+/** A raw tRPC response the desktop shell read with the web sign-in. */
+export interface CloudRaw { status: number; text: string }
+export type CloudErrorCode = "offline" | "signed_out" | "blocked" | "not_found" | "rejected" | "unavailable";
+export interface CloudError { code: CloudErrorCode; message: string }
+export interface CloudWebProject {
+  id: string; name: string; url: string;
+  repos: { url: string; key: string | null; branch: string | null }[];
+  /** Local repository with the same remote, when there is one. */
+  localPath: string | null;
+}
+/** Live state of one cloud session (`sessions.byId`). */
+export interface CloudSessionState {
+  id: string; status: string; waitKind: "question" | "approval" | "idle" | null; title: string | null; active: boolean;
+}
+export interface CloudSession {
+  id: string; projectId: string; title: string; status: string; url: string;
+  createdAt: number; updatedAt: number; unseen: boolean; pinned: boolean;
 }

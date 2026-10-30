@@ -15,7 +15,7 @@ export function SignInConfirmation({ connectors = false }: { connectors?: boolea
     } catch { setError("Could not finish sign-in. Try again."); setFinishing(false); }
   };
   return <div className="w-full space-y-3" role="group" aria-label="Finish Mistral sign-in">
-    <p role="status" className="text-sm text-text-muted">{finishing ? "Connecting your Mistral session..." : connectors ? "Add and authorize your services in Chrome, then return here." : "Finish signing in with Google or email in Chrome, then return here."}</p>
+    <p role="status" className="text-sm text-text-muted">{finishing ? "Connecting your Mistral session..." : connectors ? "Add and authorize your services in the browser window, then return here." : "Finish signing in with Google or email in the browser window, then return here."}</p>
     <div className="flex flex-wrap gap-2">
       <Button disabled={finishing} onClick={() => void finish(true)}>{connectors ? "I’ve finished setup" : "I’ve signed in"}</Button>
       <Button variant="ghost" disabled={finishing} onClick={() => void finish(false)}>Cancel sign-in</Button>

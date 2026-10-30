@@ -19,12 +19,24 @@ contextBridge.exposeInMainWorld("vibedeck", {
       return () => ipcRenderer.removeListener("workspace:state", listener);
     },
   },
+  // Vibe Code Web queries and session replies through the signed-in workspace.
+  cloud: {
+    read: (procedure, params) => ipcRenderer.invoke("cloud:read", procedure, params),
+    write: (procedure, params) => ipcRenderer.invoke("cloud:write", procedure, params),
+  },
   usage: {
     account: () => ipcRenderer.invoke("usage:account"),
     connect: () => ipcRenderer.invoke("usage:connect"),
     confirmSignIn: accepted => ipcRenderer.invoke("usage:confirm-signin", accepted),
     disconnect: () => ipcRenderer.invoke("usage:disconnect"),
     read: (year, month, refresh = false) => ipcRenderer.invoke("usage:read", year, month, refresh),
+  },
+  desktop: {
+    get: () => ipcRenderer.invoke("desktop:get"),
+    set: patch => ipcRenderer.invoke("desktop:set", patch),
+  },
+  tray: {
+    setUsage: value => ipcRenderer.invoke("tray:set-usage", value),
   },
   getZoom: () => ipcRenderer.invoke("window:get-zoom"),
   setZoom: factor => ipcRenderer.invoke("window:set-zoom", factor),
@@ -42,5 +54,9 @@ contextBridge.exposeInMainWorld("vibedeck", {
   pickDirectory: () => ipcRenderer.invoke("vibedeck:pick-directory"),
 });
 
+// Tray menu items route the SPA (New session, Usage, Settings).
+ipcRenderer.on("app:navigate", (_event, route) => {
+  if (typeof route === "string" && route.startsWith("/")) window.dispatchEvent(new CustomEvent("vibedeck:navigate", { detail: route }));
+});
 // A completed web sign-in must refresh after the main process invalidates its cache.
 ipcRenderer.on("usage:changed", () => window.dispatchEvent(new Event("vibedeck:usage-refresh")));

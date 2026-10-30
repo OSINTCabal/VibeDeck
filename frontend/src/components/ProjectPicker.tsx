@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Check, ChevronDown, FolderOpen, FolderSearch, Keyboard, Home } from "lucide-react";
+import { Check, ChevronDown, FolderGit2, FolderOpen, FolderSearch, GitBranch, Keyboard, Home, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getProjects } from "@/lib/api";
 import { pickDirectory } from "@/lib/windowControls";
@@ -8,6 +8,7 @@ interface ProjectDir {
   path: string;
   name: string;
   lastUsed?: number;
+  branch?: string | null;
 }
 
 const RECENTS_KEY = "vibedeck.cwd.recents";
@@ -58,19 +59,23 @@ export function ProjectPicker({
   const [draft, setDraft] = React.useState(cwd);
   const [recent, setRecent] = React.useState<ProjectDir[]>([]);
   const [known, setKnown] = React.useState<ProjectDir[]>([]);
+  const [repos, setRepos] = React.useState<ProjectDir[]>([]);
   const [home, setHome] = React.useState("");
+  const [q, setQ] = React.useState("");
   const btnRef = React.useRef<HTMLButtonElement>(null);
   const [placement, setPlacement] = React.useState<"up" | "down">("up");
   const [listMaxH, setListMaxH] = React.useState(320);
 
-  // load candidates once per mount
+  // load candidates on mount and whenever the menu opens (branches change)
   React.useEffect(() => {
+    if (!open && recent.length + known.length + repos.length > 0) return;
     getProjects().then((d) => {
       setHome(d.home || "");
       setRecent(d.recent || []);
       setKnown(d.known || []);
+      setRepos(d.repos || []);
     }).catch(() => {});
-  }, []);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // menu placement: open upward (composer sits at the bottom), flip if needed
   React.useLayoutEffect(() => {
@@ -80,10 +85,10 @@ export function ProjectPicker({
     const spaceBelow = window.innerHeight - r.bottom - 8;
     if (spaceAbove >= 320 || spaceAbove >= spaceBelow) {
       setPlacement("up");
-      setListMaxH(Math.max(160, Math.min(320, spaceAbove - 8)));
+      setListMaxH(Math.max(160, Math.min(320, spaceAbove - 50)));
     } else {
       setPlacement("down");
-      setListMaxH(Math.max(160, Math.min(320, spaceBelow - 8)));
+      setListMaxH(Math.max(160, Math.min(320, spaceBelow - 50)));
     }
   }, [open]);
 
@@ -99,6 +104,7 @@ export function ProjectPicker({
     rememberCwd(path);
     setOpen(false);
     setEditing(false);
+    setQ("");
   };
 
   const browse = async () => {
@@ -108,15 +114,23 @@ export function ProjectPicker({
   };
 
   // merge localStorage recents with the sidecar's session-derived recents
+  const branchOf = new Map<string, string | null | undefined>([
+    ...repos.map((r) => [r.path, r.branch] as const),
+    ...recent.map((r) => [r.path, r.branch] as const),
+  ]);
   const localRecents = readRecents();
   const mergedRecent: ProjectDir[] = [];
   const seen = new Set<string>();
   for (const p of [...localRecents, ...recent.map((r) => r.path)]) {
     if (seen.has(p)) continue;
     seen.add(p);
-    mergedRecent.push({ path: p, name: baseName(p) });
+    mergedRecent.push({ path: p, name: baseName(p), branch: branchOf.get(p) });
   }
-  const knownFiltered = known.filter((k) => !seen.has(k.path));
+  const needle = q.trim().toLowerCase();
+  const matches = (p: ProjectDir) => !needle || p.name.toLowerCase().includes(needle) || p.path.toLowerCase().includes(needle);
+  const recentShown = mergedRecent.slice(0, needle ? undefined : MAX_RECENTS).filter(matches);
+  const reposShown = repos.filter((r) => !seen.has(r.path) && matches(r));
+  const knownFiltered = known.filter((k) => !seen.has(k.path) && matches(k));
 
   if (editing) {
     return (
@@ -152,7 +166,14 @@ export function ProjectPicker({
         <Check size={13} className={cn("shrink-0", active ? "text-primary" : "opacity-0")} />
         <span className="shrink-0 text-text-faint">{icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block text-xs text-text truncate">{p.name}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-xs text-text truncate">{p.name}</span>
+            {p.branch && (
+              <span className="flex shrink-0 items-center gap-0.5 rounded bg-surface-muted px-1 py-px font-mono text-[10px] text-text-muted max-w-[110px]" title={`Branch ${p.branch}`}>
+                <GitBranch size={9} className="shrink-0" /><span className="truncate">{p.branch}</span>
+              </span>
+            )}
+          </span>
           <span className="block text-[10px] text-text-faint font-mono truncate">{p.path}</span>
         </span>
       </button>
@@ -168,31 +189,53 @@ export function ProjectPicker({
       <button
         ref={btnRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => { setOpen((o) => !o); setQ(""); }}
         title={cwd || "Select project"}
         aria-label="Select project directory"
-        className="flex items-center gap-1 h-7 max-w-[180px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+        className="flex items-center gap-1.5 h-8 max-w-[180px] rounded-md px-2.5 text-sm text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out"
       >
-        <FolderOpen size={12} className="shrink-0" />
-        <span className="truncate font-mono text-xs">{cwd ? baseName(cwd) : "Select project"}</span>
-        <ChevronDown size={11} className="shrink-0" />
+        <FolderOpen size={16} className="shrink-0" />
+        <span className="hidden truncate sm:inline">{cwd ? baseName(cwd) : "Select project"}</span>
+        <ChevronDown size={14} className="shrink-0 opacity-60" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={cn(
-            "absolute left-0 z-50 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up",
+          <div data-side={placement === "up" ? "top" : "bottom"} className={cn(
+            "absolute left-0 z-50 w-80 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
           )}>
-            <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-text-faint border-b border-border">
-              Project directory
+            <div className="flex items-center gap-2 px-3 border-b border-border">
+              <Search size={13} className="text-text-faint shrink-0" />
+              <input
+                autoFocus
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter") return;
+                  const first = [...recentShown, ...reposShown, ...knownFiltered][0];
+                  if (first) select(first.path);
+                }}
+                placeholder="Search projects and repositories…"
+                aria-label="Search projects"
+                className="w-full bg-transparent py-2.5 text-sm text-text placeholder:text-text-faint focus:outline-none"
+              />
             </div>
             <div className="overflow-y-auto py-1" style={{ maxHeight: listMaxH }}>
-              {mergedRecent.length > 0 && (
+              {recentShown.length > 0 && (
                 <>
                   {section("Recent")}
-                  {mergedRecent.slice(0, MAX_RECENTS).map((p) => row(p, <FolderOpen size={13} />))}
+                  {recentShown.map((p) => row(p, p.branch ? <FolderGit2 size={13} /> : <FolderOpen size={13} />))}
                 </>
+              )}
+              {reposShown.length > 0 && (
+                <>
+                  {section("Repositories")}
+                  {reposShown.map((p) => row(p, <FolderGit2 size={13} />))}
+                </>
+              )}
+              {needle && !recentShown.length && !reposShown.length && !knownFiltered.length && (
+                <div className="px-3 py-3 text-xs text-text-faint">No projects match.</div>
               )}
               {knownFiltered.length > 0 && (
                 <>
@@ -200,7 +243,7 @@ export function ProjectPicker({
                   {knownFiltered.map((p) => row(p, <FolderOpen size={13} />))}
                 </>
               )}
-              {home && !seen.has(home) && (
+              {home && !seen.has(home) && !needle && (
                 <>
                   {section("Locations")}
                   {row({ path: home, name: "Home" }, <Home size={13} />)}

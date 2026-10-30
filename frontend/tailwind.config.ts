@@ -1,6 +1,6 @@
 import type { Config } from "tailwindcss";
 
-// VibeDeck design tokens — Mistral dark theme (warm charcoal + signature orange).
+// VibeDeck design tokens — the Vibe webapp palette (neutral charcoal + Mistral orange).
 const config: Config = {
   darkMode: ["class"],
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
@@ -17,6 +17,8 @@ const config: Config = {
         "text-muted": "hsl(var(--muted-foreground))",
         "text-faint": "hsl(var(--text-faint))",
         primary: "hsl(var(--primary))",
+        "primary-hover": "hsl(var(--primary-hover))",
+        "primary-press": "hsl(var(--primary-press))",
         "primary-foreground": "hsl(var(--primary-foreground))",
         accent: "hsl(var(--accent))",
         "accent-foreground": "hsl(var(--accent-foreground))",
@@ -27,6 +29,7 @@ const config: Config = {
         sidebar: "hsl(var(--sidebar-background))",
         "sidebar-border": "hsl(var(--sidebar-border))",
         "sidebar-accent": "hsl(var(--sidebar-accent))",
+        code: "hsl(var(--code-background))",
       },
       fontFamily: {
         sans: ["Inter", "system-ui", "sans-serif"],
@@ -36,6 +39,7 @@ const config: Config = {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+        xl: "0.875rem",
       },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
