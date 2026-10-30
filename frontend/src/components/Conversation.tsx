@@ -255,6 +255,8 @@ export function Conversation({ session }: { session: Session }) {
             onModelChange={changeModel}
             agent={agent}
             onAgentChange={changeAgent}
+            contextTokens={conv.stats?.contextTokens ?? null}
+            sessionTokens={conv.stats ? conv.stats.sessionPromptTokens + conv.stats.sessionCompletionTokens : null}
             footer={conv.stats ? (
               <div className="mt-2 flex items-center justify-end px-1 text-xs text-text-faint font-mono">
                 {formatTokens(conv.stats.sessionPromptTokens + conv.stats.sessionCompletionTokens)} tokens

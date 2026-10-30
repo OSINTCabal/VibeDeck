@@ -59,16 +59,37 @@ async function browserTarget(base) {
   if (`http://127.0.0.1:${port}` !== base) throw new Error('Usage browser changed. Try connecting again.');
   return browserPath.slice('/devtools/'.length);
 }
+// The reader drives the browser over the Chrome DevTools Protocol, so any
+// Chromium-based browser works. Firefox-based browsers (Firefox, Zen,
+// LibreWolf) no longer expose CDP and cannot be used.
+const LINUX_BROWSERS = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'brave', 'brave-browser',
+  'helium-browser', 'helium', 'vivaldi', 'vivaldi-stable', 'microsoft-edge', 'microsoft-edge-stable', 'opera', 'thorium-browser', 'ungoogled-chromium'];
+const LINUX_FIXED = ['/opt/google/chrome/chrome', '/opt/brave.com/brave/brave', '/opt/helium-browser-bin/helium', '/opt/vivaldi/vivaldi',
+  '/opt/microsoft/msedge/msedge', '/var/lib/flatpak/exports/bin/com.google.Chrome', '/var/lib/flatpak/exports/bin/org.chromium.Chromium',
+  '/var/lib/flatpak/exports/bin/com.brave.Browser'];
 async function executable() {
-  const candidates = process.platform === 'darwin'
-    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
-    : process.platform === 'win32'
-      ? [path.join(process.env.PROGRAMFILES || '', 'Google/Chrome/Application/chrome.exe'), path.join(process.env.LOCALAPPDATA || '', 'Google/Chrome/Application/chrome.exe')]
-      : ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'];
+  const candidates = [];
+  if (process.env.VIBEDECK_BROWSER) candidates.push(process.env.VIBEDECK_BROWSER);
+  if (process.platform === 'darwin') {
+    candidates.push(...['Google Chrome', 'Chromium', 'Brave Browser', 'Helium', 'Vivaldi', 'Microsoft Edge', 'Arc']
+      .map(name => `/Applications/${name}.app/Contents/MacOS/${name}`));
+  } else if (process.platform === 'win32') {
+    const roots = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+    for (const root of roots) candidates.push(...['Google/Chrome/Application/chrome.exe', 'Chromium/Application/chrome.exe',
+      'BraveSoftware/Brave-Browser/Application/brave.exe', 'Microsoft/Edge/Application/msedge.exe', 'Vivaldi/Application/vivaldi.exe']
+      .map(rel => path.join(root, rel)));
+  } else {
+    const dirs = (process.env.PATH || '/usr/bin').split(path.delimiter).filter(Boolean);
+    for (const name of LINUX_BROWSERS) candidates.push(...dirs.map(dir => path.join(dir, name)));
+    candidates.push(...LINUX_FIXED);
+    const flatpak = path.join(process.env.HOME || '', '.local/share/flatpak/exports/bin');
+    candidates.push(...['com.google.Chrome', 'org.chromium.Chromium', 'com.brave.Browser'].map(id => path.join(flatpak, id)));
+  }
   for (const candidate of candidates) {
     try { await fs.access(candidate); return candidate; } catch { /* Try the next installed browser. */ }
   }
-  throw new Error('Install Google Chrome or Chromium to connect Mistral usage.');
+  throw new Error('Install a Chromium-based browser (Chrome, Chromium, Brave, Helium, Vivaldi or Edge) to connect Mistral usage. '
+    + 'Firefox and Zen do not support the DevTools protocol VibeDeck uses. Set VIBEDECK_BROWSER to point at a custom browser.');
 }
 async function stopBrowsers() {
   if (starting) await starting.catch(() => {});

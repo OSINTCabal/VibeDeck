@@ -2,6 +2,7 @@ import * as React from "react";
 import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AgentPicker, ModelPicker } from "./Pickers";
+import { UsageMeter } from "./UsageMeter";
 
 /** Image attachment in the wire format the vibe app-server expects. */
 export interface ImageAttachment {
@@ -48,7 +49,7 @@ export function Composer({
   running = false, disabled = false,
   placeholder = "Type / for quick access",
   model, onModelChange, agent, onAgentChange,
-  extraLeft, footer, className, sendError,
+  extraLeft, footer, className, sendError, contextTokens, sessionTokens,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -65,6 +66,8 @@ export function Composer({
   footer?: React.ReactNode;
   className?: string;
   sendError?: string | null;
+  contextTokens?: number | null;
+  sessionTokens?: number | null;
 }) {
   const taRef = React.useRef<HTMLTextAreaElement>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -173,6 +176,7 @@ export function Composer({
           {extraLeft}
           <AgentPicker value={agent} onChange={onAgentChange} />
           <div className="flex-1" />
+          <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} />
           <ModelPicker value={model} onChange={onModelChange} />
           {running ? (
             <button

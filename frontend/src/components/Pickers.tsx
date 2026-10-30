@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Check, ChevronDown, Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, modelLabel } from "@/lib/utils";
 import { getAgents, getConfig, studioModels } from "@/lib/api";
 import type { AgentInfo, ModelInfo } from "@/lib/types";
 
@@ -95,7 +95,7 @@ export function useVibeModels(): { models: ModelInfo[]; loading: boolean } {
       if (!vibeModelPromise) {
         vibeModelPromise = getConfig().then(d => {
           const models = (d.vibeModels || []).map(v => ({ id: v.id, name: v.name, description: "",
-            maxContextLength: null, functionCalling: true, vision: v.supportsImages, ownedBy: "" }));
+            maxContextLength: v.autoCompactThreshold || v.maxContextLength || null, functionCalling: true, vision: v.supportsImages, ownedBy: "" }));
           if (models.length && generation === registryGeneration) vibeModelCache = models;
           return models;
         });
@@ -149,9 +149,12 @@ export function ModelPicker({
     return l;
   }, [models, value]);
 
+  const needle = q.toLowerCase();
   const filtered = list.filter((m) =>
-    !q || m.id.toLowerCase().includes(q.toLowerCase()) ||
-    (m.description || "").toLowerCase().includes(q.toLowerCase()));
+    !q || m.id.toLowerCase().includes(needle) || modelLabel(m.id, m.name).toLowerCase().includes(needle) ||
+    (m.description || "").toLowerCase().includes(needle));
+  const current = list.find((m) => m.id === value);
+  const currentLabel = modelLabel(value, current?.name);
 
   return (
     <div className={cn("relative", className)}>
@@ -159,12 +162,12 @@ export function ModelPicker({
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Model"
+        title={`Model — ${value}`}
         aria-label="Select model"
         className="flex items-center gap-1 h-7 max-w-[200px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
       >
         <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-        <span className="truncate">{value}</span>
+        <span className="truncate">{currentLabel}</span>
         <ChevronDown size={12} className="shrink-0" />
       </button>
       {open && (
@@ -202,10 +205,10 @@ export function ModelPicker({
                   >
                     <Check size={14} className={cn("mt-0.5 shrink-0", active ? "text-primary" : "opacity-0")} />
                     <span className="min-w-0 flex-1">
-                      <span className="block font-mono text-xs text-text truncate">{m.id}</span>
-                      {m.description && (
-                        <span className="block text-[11px] text-text-faint truncate mt-0.5">{m.description}</span>
-                      )}
+                      <span className="block text-xs text-text truncate">{modelLabel(m.id, m.name)}</span>
+                      <span className="block font-mono text-[11px] text-text-faint truncate mt-0.5">
+                        {m.id}{m.description ? ` · ${m.description}` : ""}
+                      </span>
                     </span>
                     {m.vision && (
                       <span title="Vision" className="text-[10px] text-info mt-0.5 shrink-0">vision</span>

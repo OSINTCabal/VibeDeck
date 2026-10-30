@@ -919,6 +919,8 @@ async def _fetch_vibe_models() -> list[dict]:
                         "name": m.get("displayName") or alias,
                         "supportsImages": bool(m.get("supportsImages")),
                         "thinkingLevels": m.get("thinkingLevels") or [],
+                        "maxContextLength": m.get("maxContextLength"),
+                        "autoCompactThreshold": m.get("autoCompactThreshold"),
                     })
         finally:
             await bridge.close()

@@ -5,7 +5,7 @@ import {
   Network, Clock3, LayoutGrid, Folder,
 } from "lucide-react";
 import { getProjects } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, modelLabel } from "@/lib/utils";
 import { LANES, type useSessions, type useHealth } from "@/hooks/useSessions";
 import type { Lane, Session } from "@/lib/types";
 import { AccountMenu } from "./AccountMenu";
@@ -269,8 +269,8 @@ export function Sidebar({
             <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", health?.ok ? "bg-success" : "bg-danger")} />
             <span className="truncate">{health?.ok ? "Sidecar connected" : "Sidecar offline"}</span>
             {health && (
-              <span className="ml-auto shrink-0 font-mono truncate max-w-[110px]" title={health.default_model}>
-                {health.default_model}
+              <span className="ml-auto shrink-0 truncate max-w-[110px]" title={health.default_model}>
+                {modelLabel(health.default_model)}
               </span>
             )}
           </div>

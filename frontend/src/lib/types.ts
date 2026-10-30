@@ -55,6 +55,8 @@ export interface VibeModelInfo {
   name: string;
   supportsImages: boolean;
   thinkingLevels: string[];
+  maxContextLength?: number | null;
+  autoCompactThreshold?: number | null;
 }
 
 export interface Health {

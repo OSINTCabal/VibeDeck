@@ -62,6 +62,16 @@ export function AppShell() {
     localStorage.setItem("vibedeck.lane", lane);
   }, [lane]);
 
+  // Tray menu items (New session, Usage, Settings) route the app.
+  React.useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const route = (e as CustomEvent).detail;
+      if (typeof route === "string" && route.startsWith("/")) navigate(route);
+    };
+    window.addEventListener("vibedeck:navigate", onNavigate);
+    return () => window.removeEventListener("vibedeck:navigate", onNavigate);
+  }, [navigate]);
+
   // Settings can change the default lane — apply it live.
   React.useEffect(() => {
     const onLane = (e: Event) => {
@@ -126,7 +136,7 @@ export function AppShell() {
       />}
       {welcome && <dialog ref={welcomeRef} aria-labelledby="mistral-welcome-title" onCancel={event => { event.preventDefault(); dismissWelcome(); }} className="w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-border bg-surface-raised p-6 text-text shadow-2xl backdrop:bg-black/60">
         <h2 id="mistral-welcome-title" className="text-lg font-semibold">Welcome to VibeDeck</h2>
-        <p className="mt-3 text-sm text-text-muted">Connect your Mistral account with Google or email for your desktop workspace and subscription usage. Sign-in opens in regular Chrome; your workspace then runs inside VibeDeck.</p>
+        <p className="mt-3 text-sm text-text-muted">Connect your Mistral account with Google or email for your desktop workspace and subscription usage. Sign-in opens in a Chromium-based browser (Chrome, Brave, Helium…); your workspace then runs inside VibeDeck.</p>
         <p className="mt-3 text-xs text-text-faint">Your CLI account is shared with Vibe. If it needs setup, run <code>vibe --setup</code> in your terminal. Studio uses a separate Mistral API key.</p>
         {signInError && <p role="alert" className="mt-3 text-sm text-danger">{signInError}</p>}
         {connecting && <div className="mt-5"><SignInConfirmation /></div>}
