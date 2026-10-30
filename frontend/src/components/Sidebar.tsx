@@ -2,9 +2,10 @@ import * as React from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Search, PanelLeft, Trash2, ChevronDown, X,
-  Network, Clock3, LayoutGrid, Folder,
+  Network, Clock3, LayoutGrid, MoreHorizontal, Pencil,
 } from "lucide-react";
-import { getProjects } from "@/lib/api";
+import { getProjects, patchSession } from "@/lib/api";
+import { SessionMenu } from "./SessionMenu";
 import { cn, modelLabel } from "@/lib/utils";
 import { LANES, type useSessions, type useHealth } from "@/hooks/useSessions";
 import type { Lane, Session } from "@/lib/types";
@@ -67,6 +68,14 @@ export function Sidebar({
   const [projectsError, setProjectsError] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
   const menuPresence = usePresence(menuOpen);
+  const [collapsedProjects, setCollapsedProjects] = React.useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem("vibedeck.collapsed-projects") || "[]"); } catch { return []; }
+  });
+  const toggleProject = (path: string) => setCollapsedProjects(prev => {
+    const next = prev.includes(path) ? prev.filter(p => p !== path) : [...prev, path];
+    localStorage.setItem("vibedeck.collapsed-projects", JSON.stringify(next));
+    return next;
+  });
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
@@ -204,7 +213,7 @@ export function Sidebar({
               className={cn(
                 "rounded-sm text-base font-medium transition-colors duration-150",
                 lane === l.key
-                  ? "bg-sidebar text-text shadow-[inset_0_1px_0_rgb(255_255_255/0.06),inset_0_-1px_0_rgb(0_0_0/0.5)]"
+                  ? "vd-segment-active bg-sidebar text-text"
                   : "text-text-muted hover:text-text",
               )}
             >
@@ -252,11 +261,29 @@ export function Sidebar({
           <div className={cn(sectionLabel, "mt-4")}>Projects</div>
           {projects.map(project => {
             const nested = visible.filter(s => s.cwd === project.path);
+            const folded = collapsedProjects.includes(project.path) && !query.trim();
             return <div key={project.path}>
-              <NavLink to={`/?project=${encodeURIComponent(project.path)}`} className={({ isActive }) => cn(row, isActive && location.search.includes(encodeURIComponent(project.path)) ? rowActive : rowIdle)} title={project.path}>
-                <Folder size={16} className="shrink-0" /><span className="truncate">{project.name}</span>
-              </NavLink>
-              {nested.map(s => <SessionItem key={s.id} s={s} remove={remove} nested />)}
+              <div className="group relative">
+                <NavLink to={`/?project=${encodeURIComponent(project.path)}`} className={({ isActive }) => cn(row, "pr-9", isActive && location.search.includes(encodeURIComponent(project.path)) ? rowActive : rowIdle)} title={project.path}>
+                  <ProjectMark name={project.name} /><span className="truncate flex-1">{project.name}</span>
+                  {nested.length > 0 && <span className="shrink-0 text-xs text-text-faint tabular-nums group-hover:opacity-0">{nested.length}</span>}
+                </NavLink>
+                {nested.length > 0 && <button
+                  type="button"
+                  onClick={() => toggleProject(project.path)}
+                  aria-expanded={!folded}
+                  aria-label={`${folded ? "Show" : "Hide"} sessions in ${project.name}`}
+                  title={folded ? "Show sessions" : "Hide sessions"}
+                  className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-sm text-text-muted opacity-0 transition-[opacity,background-color] hover:bg-surface-muted hover:text-text focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <ChevronDown size={16} className={cn("transition-transform duration-150", folded && "-rotate-90")} />
+                </button>}
+              </div>
+              <div className="vd-collapse" data-open={!folded}>
+                <div aria-hidden={folded} ref={node => node?.toggleAttribute("inert", folded)}>
+                  {nested.map(s => <SessionItem key={s.id} s={s} remove={remove} nested />)}
+                </div>
+              </div>
             </div>;
           })}
           {projectsError && <p className="px-2.5 text-xs text-text-faint">Projects could not be loaded.</p>}
@@ -297,6 +324,18 @@ export function Sidebar({
   );
 }
 
+const MARK_COLORS = ["bg-[#fa500f]", "bg-[#e0a100]", "bg-[#2f9e6b]", "bg-[#2f7fd8]", "bg-[#8b5cf6]", "bg-[#d9467a]", "bg-[#0e9fae]"];
+
+/** 16px initial badge for a project, coloured from its name. */
+function ProjectMark({ name }: { name: string }) {
+  const hash = [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+  return (
+    <span aria-hidden="true" className={cn("grid h-4 w-4 shrink-0 place-items-center rounded-[4px] text-[10px] font-semibold uppercase leading-none text-white", MARK_COLORS[hash % MARK_COLORS.length])}>
+      {name.trim().charAt(0) || "?"}
+    </span>
+  );
+}
+
 /** The 1px tree guide beside nested rows; the active row lights a short orange segment. */
 function TreeLine({ active }: { active: boolean }) {
   return (
@@ -317,11 +356,42 @@ function SessionItem({
   const navigate = useNavigate();
   const location = useLocation();
   const active = location.pathname === `/sessions/${s.id}`;
+  const [renaming, setRenaming] = React.useState(false);
+  const [title, setTitle] = React.useState(s.title);
+  React.useEffect(() => { setTitle(s.title); }, [s.title]);
+  const save = async () => {
+    const t = title.trim();
+    setRenaming(false);
+    if (!t || t === s.title) { setTitle(s.title); return; }
+    try {
+      await patchSession(s.id, { title: t });
+      window.dispatchEvent(new Event("vibedeck:sessions"));
+    } catch { setTitle(s.title); }
+  };
+  if (renaming) {
+    return (
+      <div className={cn(row, "relative bg-surface-muted", nested && "pl-[38px]")}>
+        {nested && <TreeLine active={active} />}
+        <input
+          autoFocus
+          aria-label="Session title"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+          onBlur={() => void save()}
+          onKeyDown={e => {
+            if (e.key === "Enter") void save();
+            if (e.key === "Escape") { setTitle(s.title); setRenaming(false); }
+          }}
+          className="w-full min-w-0 bg-transparent text-sm text-text focus:outline-none"
+        />
+      </div>
+    );
+  }
   return (
     <NavLink
       to={`/sessions/${s.id}`}
       className={({ isActive }) => cn(
-        row, "group relative pr-1.5",
+        row, "group relative pr-1",
         nested && "pl-[38px]",
         isActive ? rowActive : "text-text-muted hover:bg-surface-muted hover:text-text",
       )}
@@ -337,23 +407,19 @@ function SessionItem({
           CLI
         </span>
       )}
-      <button
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          remove(s.id).then(() => {
-            if (active) navigate("/");
-          }).catch(() => {});
-        }}
-        title="Delete session"
-        aria-label={`Delete session ${s.title}`}
-        className={cn(
-          "shrink-0 grid h-6 w-6 place-items-center rounded-sm text-text-faint hover:bg-surface-muted hover:text-danger transition-colors",
-          active ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
-        )}
-      >
-        <Trash2 size={14} />
-      </button>
+      <span className={cn("shrink-0", active ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100")}>
+        <SessionMenu
+          label={`Actions for ${s.title}`}
+          trigger={<MoreHorizontal size={16} />}
+          triggerClassName="grid h-6 w-6 place-items-center rounded-sm text-text-faint transition-colors hover:bg-surface-muted hover:text-text"
+          items={[
+            { label: "Rename", icon: Pencil, onSelect: () => setRenaming(true) },
+            { label: "Delete session", icon: Trash2, danger: true, onSelect: () => {
+              remove(s.id).then(() => { if (active) navigate("/"); }).catch(() => {});
+            } },
+          ]}
+        />
+      </span>
     </NavLink>
   );
 }

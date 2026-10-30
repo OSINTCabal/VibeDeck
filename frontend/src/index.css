@@ -67,6 +67,7 @@
 
   /* Midnight — deep blue-black */
   :root[data-theme="midnight"] {
+    --code-background: 222 42% 4%;
     --background: 222 40% 6%;
     --foreground: 210 30% 94%;
     --card: 222 35% 10%;
@@ -94,6 +95,7 @@
 
   /* Dim — softer dark, lower contrast */
   :root[data-theme="dim"] {
+    --code-background: 30 6% 9%;
     --background: 30 6% 12%;
     --foreground: 30 10% 88%;
     --card: 30 6% 16%;
@@ -121,6 +123,7 @@
 
 
   :root[data-theme="forest"] {
+    --code-background: 145 22% 5%;
     --primary-hover: 158 55% 60%; --primary-press: 158 55% 60%;
     --background: 145 22% 8%; --foreground: 145 22% 95%;
     --card: 145 16% 12%; --card-foreground: 145 22% 95%;
@@ -132,6 +135,7 @@
     --sidebar-background: 145 22% 7%; --sidebar-border: 145 13% 20%; --sidebar-accent: 145 14% 16%;
   }
   :root[data-theme="plum"] {
+    --code-background: 270 18% 7%;
     --primary-hover: 270 80% 75%; --primary-press: 270 80% 75%;
     --background: 270 18% 10%; --foreground: 270 22% 96%;
     --card: 270 20% 17%; --card-foreground: 270 22% 96%;
@@ -143,6 +147,7 @@
     --sidebar-background: 270 18% 8%; --sidebar-border: 270 16% 23%; --sidebar-accent: 270 16% 18%;
   }
   :root[data-theme="contrast"] {
+    --code-background: 0 0% 4%;
     --primary-hover: 39 100% 60%; --primary-press: 39 100% 60%;
     --background: 0 0% 0%; --foreground: 0 0% 100%;
     --card: 0 0% 5%; --card-foreground: 0 0% 100%;
@@ -196,6 +201,42 @@
     outline: 2px solid hsl(var(--ring) / 0.5);
     outline-offset: 2px;
   }
+}
+
+/* Fenced code inside its header card: the card owns border and radius. */
+.prose-vd .vd-code pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding-top: 0;
+  background: transparent;
+}
+
+/* Syntax colours (highlight.js classes, added at runtime — keep unlayered). */
+:root {
+  --hl-keyword: #ff8a5c; --hl-string: #8fd19e; --hl-number: #f2c86b; --hl-title: #8db4ff;
+  --hl-attr: #c8a8ff; --hl-builtin: #6fcfd8; --hl-comment: #7c7c86;
+}
+:root[data-theme="light"] {
+  --hl-keyword: #c2410c; --hl-string: #15803d; --hl-number: #a16207; --hl-title: #1d4ed8;
+  --hl-attr: #7e22ce; --hl-builtin: #0e7490; --hl-comment: #8a877e;
+}
+.hljs-keyword, .hljs-selector-tag, .hljs-literal, .hljs-meta .hljs-keyword { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-tag { color: var(--hl-string); }
+.hljs-number, .hljs-symbol, .hljs-bullet { color: var(--hl-number); }
+.hljs-title, .hljs-section, .hljs-function .hljs-title { color: var(--hl-title); }
+.hljs-attr, .hljs-attribute, .hljs-variable, .hljs-template-variable, .hljs-property { color: var(--hl-attr); }
+.hljs-built_in, .hljs-type, .hljs-class .hljs-title, .hljs-tag { color: var(--hl-builtin); }
+.hljs-comment, .hljs-quote, .hljs-meta { color: var(--hl-comment); font-style: italic; }
+.hljs-deletion { color: hsl(var(--destructive)); }
+
+/* Active segment of the Work|Code switch: a soft inset bevel per theme. */
+.vd-segment-active {
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), inset 0 -1px 0 rgb(0 0 0 / 0.5);
+}
+:root[data-theme="light"] .vd-segment-active {
+  background: hsl(var(--card));
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 0 0 1px rgb(0 0 0 / 0.04);
 }
 
 /* Mistral's icon set is drawn with square caps and mitred joins; give the

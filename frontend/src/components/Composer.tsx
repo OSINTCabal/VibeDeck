@@ -105,9 +105,50 @@ export function Composer({
     }
   };
 
+  const [dragging, setDragging] = React.useState(false);
+
+  // Palette actions (e.g. "Use skill") drop text into the composer.
+  const valueRef = React.useRef(value);
+  valueRef.current = value;
+  React.useEffect(() => {
+    const onInsert = (event: Event) => {
+      const text = (event as CustomEvent).detail;
+      if (typeof text !== "string" || disabled) return;
+      const current = valueRef.current;
+      onChange(current && !current.endsWith(" ") && !current.endsWith("\n") ? `${current} ${text}` : current + text);
+      requestAnimationFrame(() => taRef.current?.focus());
+    };
+    window.addEventListener("vibedeck:insert", onInsert);
+    return () => window.removeEventListener("vibedeck:insert", onInsert);
+  }, [onChange, disabled]);
+
   const onFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
+    await addFiles(files);
+  };
+
+  // Images pasted or dropped onto the composer attach like picked files.
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(e.clipboardData.files || []).filter(f => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault();
+    void addFiles(files);
+  };
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    setDragging(false);
+    const files = Array.from(e.dataTransfer.files || []).filter(f => f.type.startsWith("image/"));
+    if (!files.length) return;
+    e.preventDefault();
+    void addFiles(files);
+  };
+  const onDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    if (![...e.dataTransfer.items].some(i => i.kind === "file")) return;
+    e.preventDefault();
+    setDragging(true);
+  };
+
+  const addFiles = async (files: File[]) => {
     if (!files.length) return;
     try {
       if (files.some(f => !["image/png", "image/jpeg", "image/webp", "image/gif"].includes(f.type) || f.size > 10 * 1024 * 1024)) throw new Error("Choose images up to 10 MB each.");
@@ -121,7 +162,15 @@ export function Composer({
   return (
     <div className={cn("w-full", className)}>
       {(error || sendError) && <p role="alert" className="mb-2 text-xs text-danger">{error || sendError}</p>}
-      <div className="rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgb(0_0_0/0.12),0_6px_16px_-6px_rgb(0_0_0/0.2)] transition-colors duration-150 focus-within:border-border-strong">
+      <div
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false); }}
+        className={cn(
+          "rounded-xl border border-border bg-surface shadow-[0_1px_2px_rgb(0_0_0/0.12),0_6px_16px_-6px_rgb(0_0_0/0.2)] transition-colors duration-150 focus-within:border-border-strong",
+          dragging && "border-primary/60 bg-primary/5",
+        )}
+      >
         {images.length > 0 && (
           <div className="flex flex-wrap gap-2 px-4 pt-4">
             {images.map((img, i) => (
@@ -149,6 +198,7 @@ export function Composer({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={onKeyDown}
+          onPaste={onPaste}
           placeholder={placeholder}
           rows={1}
           disabled={sending || disabled}

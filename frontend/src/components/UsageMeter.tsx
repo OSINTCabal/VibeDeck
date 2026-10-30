@@ -96,7 +96,7 @@ function Ring({ percent, spinning }: { percent: number | null; spinning: boolean
     <svg viewBox="0 0 16 16" className={cn("h-4 w-4 -rotate-90", spinning && percent == null && "animate-spin")} aria-hidden="true">
       <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" className="stroke-border-strong" />
       <circle cx="8" cy="8" r={r} fill="none" strokeWidth="2" strokeLinecap="round"
-        strokeDasharray={c} strokeDashoffset={percent == null ? c * 0.75 : c * (1 - p / 100)}
+        strokeDasharray={c} strokeDashoffset={percent == null ? (spinning ? c * 0.75 : c) : c * (1 - p / 100)}
         className={cn("transition-[stroke-dashoffset] duration-300 motion-reduce:transition-none",
           percent == null ? "stroke-text-faint" : p >= 90 ? "stroke-danger" : p >= 70 ? "stroke-accent" : "stroke-primary")} />
     </svg>

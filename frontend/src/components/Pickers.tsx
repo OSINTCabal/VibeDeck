@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Brain, ChevronDown, Eye, Search } from "lucide-react";
+import { Bot, Brain, ChevronDown, Eye, FilePen, Hand, ListChecks, Search, Sparkles, Zap } from "lucide-react";
 import { ModelIcon } from "./ModelIcon";
 import { RadioMark, menuItem, menuLabel, menuPanel, usePresence } from "./ui";
 import { cn, modelLabel } from "@/lib/utils";
@@ -211,6 +211,7 @@ export function ModelPicker({
                   type="button"
                   role="menuitemradio"
                   aria-checked={active}
+                  aria-label={`${modelLabel(m.id, m.name)} (${m.id})`}
                   title={m.id}
                   onClick={() => { onChange(m.id); setOpen(false); setQ(""); }}
                   className={cn(menuItem, "py-3")}
@@ -373,6 +374,11 @@ const MODE_LABELS: Record<string, string> = {
   "smart-approve": "Smart approve",
 };
 
+/** Icon per approval posture, so the chip still reads when its label is hidden. */
+const MODE_ICONS: Record<string, React.ElementType> = {
+  "ask": Hand, "plan": ListChecks, "accept-edits": FilePen, "auto-approve": Zap, "smart-approve": Sparkles,
+};
+
 export function AgentPicker({
   value, onChange, className,
 }: {
@@ -405,6 +411,7 @@ export function AgentPicker({
     ? { ...agent, displayName: MODE_LABELS[agent.name] || agent.displayName || agent.name }
     : (mode ? { name: mode.id, displayName: mode.label } : { name: value, displayName: value });
   const currentHint = mode?.hint || agent?.description || "";
+  const ModeIcon = MODE_ICONS[value] || Bot;
 
   const renderRow = (a: { name: string; displayName?: string; description?: string }) => {
     const active = a.name === value;
@@ -441,6 +448,7 @@ export function AgentPicker({
         aria-expanded={open}
         className={chipClass}
       >
+        <ModeIcon size={16} className="shrink-0" />
         <span className="hidden sm:inline">{current.displayName || value}</span>
         <ChevronDown size={14} className="shrink-0 opacity-60" />
       </button>

@@ -1,13 +1,15 @@
 import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import {
   Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
-  Loader2, X, Sparkles,
+  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "./ui";
+import { Badge, usePresence } from "./ui";
 import type { HistoryEntry } from "@/lib/types";
+import { durationSeconds, stepStatus, summarizeSteps } from "@/lib/steps";
 
 // ---------------------------------------------------------------- helpers
 
@@ -42,9 +44,82 @@ function toolOutput(e: HistoryEntry): string {
   return st.outputText || st.output || "";
 }
 
+// ---------------------------------------------------------------- Message actions
+
+/** Composer hooks for the per-message actions; provided by the conversation. */
+export const MessageActions = React.createContext<{
+  onEdit?: (text: string) => void;
+  onResend?: (text: string) => void;
+}>({});
+
+function useCopy(): [boolean, (text: string) => void] {
+  const [copied, setCopied] = React.useState(false);
+  const timer = React.useRef<number>();
+  React.useEffect(() => () => window.clearTimeout(timer.current), []);
+  return [copied, (text: string) => {
+    void navigator.clipboard?.writeText(text).then(() => {
+      setCopied(true);
+      window.clearTimeout(timer.current);
+      timer.current = window.setTimeout(() => setCopied(false), 1500);
+    }).catch(() => {});
+  }];
+}
+
+const actionBtn = "grid h-7 w-7 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text";
+
+function ActionBar({ text, user }: { text: string; user: boolean }) {
+  const { onEdit, onResend } = React.useContext(MessageActions);
+  const [copied, copy] = useCopy();
+  if (!text) return null;
+  return (
+    <div className={cn(
+      "mt-0.5 flex gap-0.5 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 focus-within:opacity-100",
+      user && "justify-end",
+    )}>
+      <button type="button" onClick={() => copy(text)} className={actionBtn} title={copied ? "Copied" : "Copy"} aria-label={copied ? "Copied" : "Copy message"}>
+        {copied ? <Check size={16} /> : <Copy size={16} />}
+      </button>
+      {user && onEdit && <button type="button" onClick={() => onEdit(text)} className={actionBtn} title="Edit in composer" aria-label="Edit message in composer"><Pencil size={16} /></button>}
+      {user && onResend && <button type="button" onClick={() => onResend(text)} className={actionBtn} title="Send again" aria-label="Send message again"><RotateCcw size={16} /></button>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- Code blocks
+
+function nodeText(node: React.ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (React.isValidElement(node)) return nodeText((node.props as { children?: React.ReactNode }).children);
+  return "";
+}
+
+/** Fenced code: a header with the language and a copy button above the block. */
+function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) {
+  const code = React.Children.toArray(children)[0];
+  const className = React.isValidElement(code) ? String((code.props as { className?: string }).className || "") : "";
+  const language = /language-([\w+-]+)/.exec(className)?.[1];
+  const [copied, copy] = useCopy();
+  return (
+    <div className="vd-code group/code relative my-3 overflow-hidden rounded-xl border border-border bg-code">
+      <div className="flex h-9 items-center justify-between pl-4 pr-1 text-xs text-text-muted">
+        <span className="font-mono">{language || "text"}</span>
+        <button type="button" onClick={() => copy(nodeText(children).replace(/\n$/, ""))} className={cn(actionBtn, "h-7 w-7")}
+          title={copied ? "Copied" : "Copy code"} aria-label={copied ? "Copied" : "Copy code"}>
+          {copied ? <Check size={14} /> : <Copy size={14} />}
+        </button>
+      </div>
+      <pre {...rest}>{children}</pre>
+    </div>
+  );
+}
+
+const markdownComponents = { pre: CodeBlock };
+const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"] = [[rehypeHighlight, { detect: false }]];
+
 // ---------------------------------------------------------------- User / Assistant message
 
-export function MessageEntry({ e }: { e: HistoryEntry }) {
+export function MessageEntry({ e, reveal = true }: { e: HistoryEntry; reveal?: boolean }) {
   const isUser = e.role === "user";
   const images = (e.content || []).map((content, i) => {
     const attachment = content.attachment as any;
@@ -54,24 +129,27 @@ export function MessageEntry({ e }: { e: HistoryEntry }) {
   });
   // User turns are a right-aligned pill; assistant turns are plain markdown —
   // no avatars, like the webapp. The speaker stays available to screen readers.
+  const text = entryText(e);
   if (isUser) {
     return (
-      <div className="flex justify-end px-6 py-3 vd-reveal">
+      <div className={cn("group/message flex flex-col items-end px-6 pt-3 pb-0", reveal && "vd-reveal")}>
         <div className="flex w-fit max-w-[85%] min-w-0 flex-col rounded-3xl bg-surface-muted/70 px-5 py-3">
           <span className="sr-only">You:</span>
           {images}
-          <div className="whitespace-pre-wrap break-words text-base leading-6">{entryText(e)}</div>
+          <div className="whitespace-pre-wrap break-words text-base leading-6">{text}</div>
         </div>
+        <ActionBar text={text} user />
       </div>
     );
   }
   return (
-    <div className="px-6 py-3 vd-reveal">
+    <div className={cn("group/message px-6 pt-3 pb-0", reveal && "vd-reveal")}>
       <span className="sr-only">Vibe:</span>
       {images}
       <div className="prose-vd">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{entryText(e)}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{text}</ReactMarkdown>
       </div>
+      <ActionBar text={text} user={false} />
     </div>
   );
 }
@@ -109,19 +187,22 @@ function DisclosureRow({
 
 export function ReasoningBlock({ e, defaultExpanded = false }: { e: HistoryEntry; defaultExpanded?: boolean }) {
   const [open, setOpen] = React.useState(defaultExpanded);
+  const body = usePresence(open, 300);
   const contentId = React.useId();
   const text = e.text || "";
   const streaming = e.generationStatus === "in_progress";
+  const seconds = streaming ? null : durationSeconds(e);
+  const label = streaming ? "Thinking…" : seconds ? `Thought for ${seconds}s` : "Thought process";
   return (
     <div className="px-6 py-1.5">
       <DisclosureRow open={open} onToggle={() => setOpen((v) => !v)} controls={contentId}
-        icon={Lightbulb} label={streaming ? "Thinking…" : "Thought process"} busy={streaming} />
+        icon={Lightbulb} label={label} busy={streaming} />
       <div className="vd-collapse" data-open={open}>
-        <div id={contentId} aria-hidden={!open} ref={node => node?.toggleAttribute("inert", !open)}>
+        <div id={contentId}>{body.mounted && <>
           <div className="mt-2 ml-2 border-l border-border pl-4 text-sm leading-6 text-text-muted whitespace-pre-wrap">
             {text || <span className="text-text-faint">…</span>}
           </div>
-        </div>
+        </>}</div>
       </div>
     </div>
   );
@@ -135,8 +216,37 @@ const toolIcon = (name: string) => {
   return Wrench;
 };
 
+// ---------------------------------------------------------------- Step group
+
+/** Consecutive tool calls folded into one summary row; expands to the calls. */
+export const StepGroup = React.memo(function StepGroup({ entries }: { entries: HistoryEntry[] }) {
+  const [open, setOpen] = React.useState(false);
+  const body = usePresence(open, 300);
+  const contentId = React.useId();
+  const statuses = entries.map(stepStatus);
+  const running = statuses.includes("running");
+  const failed = statuses.filter(s => s === "failed").length;
+  return (
+    <div className="py-1.5">
+      <div className="px-6">
+        <DisclosureRow open={open} onToggle={() => setOpen(v => !v)} controls={contentId}
+          icon={Wrench} label={summarizeSteps(entries)} busy={running}
+          trailing={failed ? <span className="shrink-0 text-xs text-danger">{failed} failed</span> : undefined} />
+      </div>
+      <div className="vd-collapse" data-open={open}>
+        <div id={contentId}>{body.mounted && <>
+          <div className="mt-1 ml-8 border-l border-border [&>div]:px-4">
+            {entries.map(e => <ToolCallBlock key={e.id} e={e} />)}
+          </div>
+        </>}</div>
+      </div>
+    </div>
+  );
+}, (a, b) => a.entries.length === b.entries.length && a.entries.every((e, i) => e === b.entries[i]));
+
 export function ToolCallBlock({ e }: { e: HistoryEntry }) {
   const [open, setOpen] = React.useState(false);
+  const body = usePresence(open, 300);
   const contentId = React.useId();
   const d: any = e.detail || {};
   const st: any = e.state || {};
@@ -153,7 +263,7 @@ export function ToolCallBlock({ e }: { e: HistoryEntry }) {
         icon={Icon} label={name} detail={toolSummary(e)} busy={running}
         trailing={<StatusMark status={status} />} />
       <div className="vd-collapse" data-open={open}>
-        <div id={contentId} aria-hidden={!open} ref={node => node?.toggleAttribute("inert", !open)}>
+        <div id={contentId}>{body.mounted && <>
           <div className={cn("mt-2 ml-6 space-y-2", failed && "text-danger")}>
             {input && (
               <div>
@@ -171,7 +281,7 @@ export function ToolCallBlock({ e }: { e: HistoryEntry }) {
               <div className="text-xs text-text-faint">No details.</div>
             )}
           </div>
-        </div>
+        </>}</div>
       </div>
     </div>
   );
@@ -306,15 +416,16 @@ export function NoticeBlock({ e }: { e: HistoryEntry }) {
 // Memoized: while a turn streams, only the updated entry gets a new object
 // reference, so unchanged messages skip re-rendering on every token.
 export const EntryBlock = React.memo(function EntryBlock({
-  e, onResolve, expandReasoning = false,
+  e, onResolve, expandReasoning = false, reveal = true,
 }: {
   e: HistoryEntry;
   expandReasoning?: boolean;
+  reveal?: boolean;
   onResolve: (callbackId: string, decision: string, userInput?: unknown) => Promise<void>;
 }) {
   switch (e.type) {
     case "message":
-      return <MessageEntry e={e} />;
+      return <MessageEntry e={e} reveal={reveal} />;
     case "reasoning":
       return <ReasoningBlock e={e} defaultExpanded={expandReasoning} />;
     case "effect":

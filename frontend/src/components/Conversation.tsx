@@ -1,13 +1,18 @@
 import * as React from "react";
-import { AlertTriangle, Bot, Cloud, Folder, Loader2, Pencil, Terminal, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, Folder, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
-import { EntryBlock } from "./MessageBlocks";
+import { EntryBlock, MessageActions, StepGroup } from "./MessageBlocks";
+import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
-import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession } from "@/lib/api";
+import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession } from "@/lib/api";
+import { SessionMenu } from "./SessionMenu";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
+
+const PAGE = 60;
 
 export function Conversation({ session }: { session: Session }) {
   const [released, setReleased] = React.useState(false);
@@ -24,6 +29,7 @@ export function Conversation({ session }: { session: Session }) {
   const [agent, setAgent] = React.useState(session.agent || "");
   React.useEffect(() => { setModel(session.model || ""); setAgent(session.agent || ""); }, [session.model, session.agent]);
   const scrollRef = React.useRef<HTMLDivElement>(null);
+  const [atBottom, setAtBottom] = React.useState(true);
   const pinned = React.useRef(true);
 
   React.useEffect(() => {
@@ -140,8 +146,44 @@ export function Conversation({ session }: { session: Session }) {
   };
 
   const banner = sendError || conv.error;
+  const navigate = useNavigate();
+  const [renameRequest, setRenameRequest] = React.useState(0);
+  const removeSession = async () => {
+    try {
+      await deleteSession(session.id);
+      window.dispatchEvent(new Event("vibedeck:sessions"));
+      navigate("/");
+    } catch (e) { setSendError(`Could not delete: ${e}`); }
+  };
+  // Message actions: stable callbacks so memoized entries do not re-render.
+  const sendRef = React.useRef(send);
+  sendRef.current = send;
+  const actions = React.useMemo(() => ({
+    onEdit: (t: string) => {
+      setText(t);
+      requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-vd-composer]")?.focus());
+    },
+    onResend: (t: string) => { void sendRef.current(t, []).catch(() => {}); },
+  }), []);
+  const steps = React.useMemo(() => groupSteps(conv.entries), [conv.entries]);
+  // Long sessions open on their latest steps; older ones render on demand, so
+  // switching sessions does not lay out hundreds of markdown blocks at once.
+  const [shown, setShown] = React.useState(PAGE);
+  const hidden = Math.max(0, steps.length - shown);
+  const visibleSteps = hidden ? steps.slice(hidden) : steps;
+  // Entries already in the first snapshot appear at once; only live ones animate in.
+  const settled = React.useRef<Set<string> | null>(null);
+  if (!settled.current && !conv.loading) settled.current = new Set(conv.entries.map(e => e.id));
+  const reveal = (id: string) => !settled.current?.has(id);
+  const showEarlier = () => {
+    const el = scrollRef.current;
+    const before = el ? el.scrollHeight - el.scrollTop : 0;
+    setShown(n => n + PAGE);
+    requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - before; });
+  };
 
   return (
+    <MessageActions.Provider value={actions}>
     <div className="flex h-full flex-col">
       {/* header */}
       <div className="flex h-12 items-center gap-1 pl-5 pr-3 shrink-0">
@@ -151,7 +193,22 @@ export function Conversation({ session }: { session: Session }) {
             <span className="truncate">{session.cwd.split("/").filter(Boolean).pop() || session.cwd}</span>
           </span>
           <span className="hidden shrink-0 text-text-faint sm:inline">/</span>
-          <div className="min-w-0 flex-1"><SessionTitle session={session} /></div>
+          <div className="flex min-w-0 flex-1 items-center gap-0.5">
+            <div className="min-w-0"><SessionTitle session={session} renameRequest={renameRequest} /></div>
+            <SessionMenu
+              label="Session actions"
+              align="start"
+              trigger={<ChevronDown size={16} />}
+              triggerClassName="grid h-7 w-7 shrink-0 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text"
+              items={[
+                { label: "Rename", icon: Pencil, onSelect: () => setRenameRequest(n => n + 1) },
+                { label: "Continue in the cloud", icon: Cloud, onSelect: () => setCloudOpen(true), disabled: running },
+                { label: "Continue in the vibe CLI", icon: Terminal, onSelect: () => void handoffToCli(), disabled: running },
+                { label: "Copy session ID", icon: Copy, onSelect: () => void navigator.clipboard?.writeText(session.id).catch(() => {}) },
+                { label: "Delete session", icon: Trash2, onSelect: () => void removeSession(), danger: true, disabled: running },
+              ]}
+            />
+          </div>
         </div>
         <button
           onClick={() => setCloudOpen(true)}
@@ -182,9 +239,11 @@ export function Conversation({ session }: { session: Session }) {
       </div>
 
       {/* messages — centered column, aligned with the composer */}
-      <div ref={scrollRef} onScroll={event => { const el = event.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={scrollRef} onScroll={event => { const el = event.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; setAtBottom(pinned.current); }} className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto max-w-3xl min-h-full flex flex-col gap-1 pt-4 pb-6">
-          {conv.historyBeforeCursor && <button onClick={() => void conv.loadEarlier()} className="mx-auto my-3 text-xs text-primary hover:underline">Load earlier messages</button>}
+          {hidden > 0
+            ? <button onClick={showEarlier} className="mx-auto my-3 rounded-md px-2.5 py-1 text-sm text-text-muted transition-colors hover:bg-surface-muted hover:text-text">Show {Math.min(hidden, PAGE)} earlier steps</button>
+            : conv.historyBeforeCursor && <button onClick={() => void conv.loadEarlier()} className="mx-auto my-3 rounded-md px-2.5 py-1 text-sm text-text-muted transition-colors hover:bg-surface-muted hover:text-text">Load earlier messages</button>}
           {conv.loading && (
             <div className="my-auto flex items-center gap-2 px-6 py-8 text-text-muted text-sm">
               <Loader2 size={14} className="animate-spin text-primary" /> Loading conversation…
@@ -195,9 +254,9 @@ export function Conversation({ session }: { session: Session }) {
               No messages yet. Send a prompt below to start the agent.
             </div>
           )}
-          {conv.entries.map((e) => (
-            <EntryBlock key={e.id} e={e} onResolve={onResolve} expandReasoning={session.lane === "work"} />
-          ))}
+          {visibleSteps.map((item) => item.kind === "group"
+            ? <StepGroup key={item.entries[0].id} entries={item.entries} />
+            : <EntryBlock key={item.entry.id} e={item.entry} onResolve={onResolve} expandReasoning={session.lane === "work"} reveal={reveal(item.entry.id)} />)}
           {running && (
             <div className="px-6 py-2 flex items-center gap-2 text-sm font-medium text-text-muted">
               <span className="vd-dots text-primary"><span /><span /><span /></span>
@@ -264,7 +323,18 @@ export function Conversation({ session }: { session: Session }) {
 
       {/* composer */}
       <div className="shrink-0 px-6 pt-2 pb-4">
-        <div className="mx-auto max-w-3xl">
+        <div className="relative mx-auto max-w-3xl">
+          {!atBottom && (
+            <button
+              type="button"
+              onClick={() => { const el = scrollRef.current; if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" }); }}
+              aria-label="Scroll to latest"
+              title="Scroll to latest"
+              className="vd-menu absolute -top-12 left-1/2 z-10 -ml-4 grid h-8 w-8 place-items-center rounded-full border border-border bg-surface-raised text-text-muted shadow-lg transition-colors hover:text-text"
+            >
+              <ArrowDown size={16} />
+            </button>
+          )}
           <Composer
             value={text}
             onChange={setText}
@@ -291,6 +361,7 @@ export function Conversation({ session }: { session: Session }) {
         </div>
       </div>
     </div>
+    </MessageActions.Provider>
   );
 }
 
@@ -319,8 +390,9 @@ function SubagentChip({ cs }: { cs: ChildSession }) {
 
 // ---------------------------------------------------------------- editable title
 
-function SessionTitle({ session }: { session: Session }) {
+function SessionTitle({ session, renameRequest = 0 }: { session: Session; renameRequest?: number }) {
   const [editing, setEditing] = React.useState(false);
+  React.useEffect(() => { if (renameRequest) setEditing(true); }, [renameRequest]);
   const [title, setTitle] = React.useState(session.title);
   const [busy, setBusy] = React.useState(false);
 
@@ -333,6 +405,7 @@ function SessionTitle({ session }: { session: Session }) {
     setBusy(true);
     try {
       await patchSession(session.id, { title: t });
+      window.dispatchEvent(new Event("vibedeck:sessions"));
     } catch {
       setTitle(session.title);
     } finally {
@@ -351,7 +424,7 @@ function SessionTitle({ session }: { session: Session }) {
           if (e.key === "Enter") save();
           if (e.key === "Escape") { setTitle(session.title); setEditing(false); }
         }}
-        className="w-full bg-transparent text-sm text-text focus:outline-none border-b border-border focus:border-primary"
+        className="w-72 max-w-full bg-transparent text-sm text-text focus:outline-none border-b border-border focus:border-primary"
       />
     );
   }
