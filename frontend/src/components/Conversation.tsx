@@ -1,7 +1,8 @@
 import * as React from "react";
-import { AlertTriangle, Bot, Loader2, Pencil, Terminal, X } from "lucide-react";
+import { AlertTriangle, Bot, Cloud, Loader2, Pencil, Terminal, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
+import { CloudDialog } from "./CloudDialog";
 import { EntryBlock } from "./MessageBlocks";
 import { useConversation } from "@/hooks/useConversation";
 import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession } from "@/lib/api";
@@ -17,6 +18,7 @@ export function Conversation({ session }: { session: Session }) {
   const [sending, setSending] = React.useState(false);
   const [sendError, setSendError] = React.useState<string | null>(null);
   const [handoff, setHandoff] = React.useState<string | null>(null);
+  const [cloudOpen, setCloudOpen] = React.useState(false);
   const [warnings, setWarnings] = React.useState<string[]>(session.warnings ?? []);
   const [model, setModel] = React.useState(session.model || "");
   const [agent, setAgent] = React.useState(session.agent || "");
@@ -121,6 +123,12 @@ export function Conversation({ session }: { session: Session }) {
     }
   };
 
+  const [reasoning, setReasoning] = React.useState<string | null>(session.reasoning ?? null);
+  React.useEffect(() => { setReasoning(session.reasoning ?? null); }, [session.reasoning]);
+  const changeReasoning = async (r: string | null) => {
+    try { const s = await patchSession(session.id, { reasoning: r }); setReasoning(s.reasoning ?? null); setSendError(null); }
+    catch (e) { setSendError(String(e)); }
+  };
   const changeModel = async (m: string) => {
     try { const s = await patchSession(session.id, { model: m }); setModel(s.model || ""); setSendError(null); }
     catch (e) { setSendError(`Could not change model: ${e}`); }
@@ -141,6 +149,16 @@ export function Conversation({ session }: { session: Session }) {
           <SessionTitle session={session} />
           <div className="text-xs text-text-faint font-mono truncate">{session.cwd}</div>
         </div>
+        <button
+          onClick={() => setCloudOpen(true)}
+          disabled={running}
+          title={running ? "Stop the turn to continue in the cloud" : "Continue this session on Vibe Code Web"}
+          aria-label="Continue in cloud"
+          className="shrink-0 grid h-7 w-7 place-items-center rounded-md text-text-faint hover:bg-surface-muted hover:text-text transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Cloud size={14} />
+        </button>
+        <CloudDialog sessionId={session.id} open={cloudOpen} onClose={() => setCloudOpen(false)} />
         <button
           onClick={handoffToCli}
           disabled={running}
@@ -253,6 +271,8 @@ export function Conversation({ session }: { session: Session }) {
             placeholder={`Message Vibe in ${session.cwd}…`}
             model={model}
             onModelChange={changeModel}
+            reasoning={reasoning}
+            onReasoningChange={changeReasoning}
             agent={agent}
             onAgentChange={changeAgent}
             contextTokens={conv.stats?.contextTokens ?? null}

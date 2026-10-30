@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Check, ChevronDown, Search } from "lucide-react";
+import { Brain, Check, ChevronDown, Eye, Search } from "lucide-react";
+import { ModelIcon } from "./ModelIcon";
 import { cn, modelLabel } from "@/lib/utils";
 import { getAgents, getConfig, studioModels } from "@/lib/api";
 import type { AgentInfo, ModelInfo } from "@/lib/types";
@@ -95,7 +96,8 @@ export function useVibeModels(): { models: ModelInfo[]; loading: boolean } {
       if (!vibeModelPromise) {
         vibeModelPromise = getConfig().then(d => {
           const models = (d.vibeModels || []).map(v => ({ id: v.id, name: v.name, description: "",
-            maxContextLength: v.autoCompactThreshold || v.maxContextLength || null, functionCalling: true, vision: v.supportsImages, ownedBy: "" }));
+            maxContextLength: v.autoCompactThreshold || v.maxContextLength || null, functionCalling: true, vision: v.supportsImages, ownedBy: "",
+            thinkingLevels: v.thinkingLevels || [], defaultThinking: v.thinking || null }));
           if (models.length && generation === registryGeneration) vibeModelCache = models;
           return models;
         });
@@ -166,7 +168,7 @@ export function ModelPicker({
         aria-label="Select model"
         className="flex items-center gap-1 h-7 max-w-[200px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
+        <ModelIcon id={value} />
         <span className="truncate">{currentLabel}</span>
         <ChevronDown size={12} className="shrink-0" />
       </button>
@@ -203,7 +205,7 @@ export function ModelPicker({
                       active ? "bg-surface-muted" : "hover:bg-surface-muted/60",
                     )}
                   >
-                    <Check size={14} className={cn("mt-0.5 shrink-0", active ? "text-primary" : "opacity-0")} />
+                    <ModelIcon id={m.id} size={16} className="mt-0.5" />
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs text-text truncate">{modelLabel(m.id, m.name)}</span>
                       <span className="block font-mono text-[11px] text-text-faint truncate mt-0.5">
@@ -211,8 +213,87 @@ export function ModelPicker({
                       </span>
                     </span>
                     {m.vision && (
-                      <span title="Vision" className="text-[10px] text-info mt-0.5 shrink-0">vision</span>
+                      <span title="Understands images" aria-label="Understands images" className="mt-0.5 shrink-0 text-text-faint">
+                        <Eye size={13} />
+                      </span>
                     )}
+                    <Check size={14} className={cn("mt-0.5 shrink-0", active ? "text-primary" : "opacity-0")} />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- EffortPicker — reasoning level for the model
+
+const EFFORT_LABELS: Record<string, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", max: "Max" };
+const effortLabel = (level: string) => EFFORT_LABELS[level] || level.charAt(0).toUpperCase() + level.slice(1);
+
+/**
+ * Reasoning effort chip. Offers the levels the vibe CLI registry lists for
+ * the selected model; "Default" leaves the model's own setting in place.
+ * Hidden for models without reasoning levels.
+ */
+export function EffortPicker({
+  model, value, onChange, className,
+}: {
+  model: string; value: string | null; onChange: (v: string | null) => void; className?: string;
+}) {
+  const { models } = useVibeModels();
+  const [open, setOpen] = React.useState(false);
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+  const info = models.find(m => m.id === model);
+  const levels = (info?.thinkingLevels || []).filter(l => l in EFFORT_LABELS);
+  const { placement } = useDropdownPlacement(open, btnRef, 220);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (!levels.length) return null;
+  const fallback = info?.defaultThinking ? `Default (${effortLabel(info.defaultThinking)})` : "Default";
+  const options: { id: string | null; label: string }[] = [{ id: null, label: fallback }, ...levels.map(l => ({ id: l, label: effortLabel(l) }))];
+  const current = value && levels.includes(value) ? effortLabel(value) : info?.defaultThinking ? effortLabel(info.defaultThinking) : "Auto";
+
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        title={`Reasoning effort — ${current}`}
+        aria-label="Select reasoning effort"
+        className="flex items-center gap-1 h-7 rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+      >
+        <Brain size={13} className="shrink-0" />
+        <span className="hidden sm:inline">{current}</span>
+        <ChevronDown size={12} className="shrink-0" />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className={cn(
+            "absolute right-0 z-50 w-48 rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up",
+            placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
+          )}>
+            <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-text-faint border-b border-border">Reasoning effort</div>
+            <div className="py-1">
+              {options.map(o => {
+                const active = (o.id ?? null) === (value && levels.includes(value) ? value : null);
+                return (
+                  <button key={o.id ?? "default"} type="button" onClick={() => { onChange(o.id); setOpen(false); }}
+                    className={cn("w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-text transition-colors",
+                      active ? "bg-surface-muted" : "hover:bg-surface-muted/60")}>
+                    <span className="flex-1">{o.label}</span>
+                    <Check size={13} className={cn("shrink-0", active ? "text-primary" : "opacity-0")} />
                   </button>
                 );
               })}

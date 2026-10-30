@@ -16,7 +16,7 @@ interface Ctx {
   lane: Lane;
   sessions: unknown[];
   health: { default_model: string; default_agent: string; user?: string } | null;
-  config: { defaultModel: string; defaultAgent: string } | null;
+  config: { defaultModel: string; defaultAgent: string; defaultReasoning?: string | null } | null;
 }
 
 /** Suggestion cards pinned near the bottom of the code lane, like the webapp. */
@@ -50,12 +50,14 @@ export function Welcome() {
   React.useEffect(() => { if (params.has("project")) setCwd(params.get("project") || ""); }, [params]);
   const [text, setText] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const pending = React.useRef<{ id: string; requestId: string; payload: string; cwd: string; lane: Lane; agent: string; model: string } | null>(null);
+  const pending = React.useRef<{ id: string; requestId: string; payload: string; cwd: string; lane: Lane; agent: string; model: string; reasoning: string | null } | null>(null);
   const sending = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [model, setModel] = React.useState(
     config?.defaultModel || health?.default_model || "mistral-large-4");
   React.useEffect(() => { if (config?.defaultModel) setModel(config.defaultModel); }, [config?.defaultModel]);
+  const [reasoning, setReasoning] = React.useState<string | null>(config?.defaultReasoning ?? null);
+  React.useEffect(() => { setReasoning(config?.defaultReasoning ?? null); }, [config?.defaultReasoning]);
   const defaultAgent = lane === "code" ? config?.defaultAgent || LANE_AGENT.code : LANE_AGENT.work;
   const [agent, setAgent] = React.useState(defaultAgent);
 
@@ -77,20 +79,21 @@ export function Welcome() {
         rememberCwd(cwd || "");
         const res = await fetch("/api/sessions", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cwd: cwd || undefined, lane, agent, model }),
+          body: JSON.stringify({ cwd: cwd || undefined, lane, agent, model, reasoning }),
         });
         if (!res.ok) throw new Error(await res.text());
         const s = await res.json();
-        pending.current = { id: s.id, requestId: crypto.randomUUID(), payload, cwd, lane, agent, model };
+        pending.current = { id: s.id, requestId: crypto.randomUUID(), payload, cwd, lane, agent, model, reasoning };
       }
       const session = pending.current;
       if (session.cwd !== cwd || session.lane !== lane) {
         throw new Error("This session started in another project or mode. Open it to continue, or start a new session.");
       }
-      if (session.agent !== agent || session.model !== model) {
-        const updated = await patchSession(session.id, { agent, model });
+      if (session.agent !== agent || session.model !== model || session.reasoning !== reasoning) {
+        const updated = await patchSession(session.id, { agent, model, reasoning });
         session.agent = updated.agent || agent;
         session.model = updated.model || model;
+        session.reasoning = updated.reasoning ?? reasoning;
       }
       // Configuration changes do not change the identity of a possibly accepted message.
       if (session.payload !== payload) {
@@ -133,6 +136,8 @@ export function Welcome() {
               placeholder={lane === "code" ? "What do you want to build?" : "Type / for quick access"}
               model={model}
               onModelChange={setModel}
+              reasoning={reasoning}
+              onReasoningChange={setReasoning}
               agent={agent}
               onAgentChange={setAgent}
               extraLeft={<><ProjectPicker cwd={cwd} onChange={setCwd} /><BranchPicker cwd={cwd} /></>}

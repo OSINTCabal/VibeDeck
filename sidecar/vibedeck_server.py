@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
+import cloud_teleport
 import git_projects
 import httpx
 import providers as provider_config
@@ -920,6 +921,7 @@ async def _fetch_vibe_models() -> list[dict]:
                         "name": m.get("displayName") or alias,
                         "supportsImages": bool(m.get("supportsImages")),
                         "thinkingLevels": m.get("thinkingLevels") or [],
+                        "thinking": m.get("thinking"),
                         "maxContextLength": m.get("maxContextLength"),
                         "autoCompactThreshold": m.get("autoCompactThreshold"),
                     })
@@ -1783,6 +1785,126 @@ async def studio_account(sid: Optional[str] = Query(None)) -> dict:
         except BridgeError as e:
             out["error"] = e.message
     return out
+
+
+# ---- Vibe Code Web: continue a session in the cloud (teleport)
+
+_teleports = cloud_teleport.TeleportRegistry()
+
+
+class CloudOpenReq(BaseModel):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPickerReq(BaseModel):
+    picker_id: str = Field(..., alias="pickerId", min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CloudSelectReq(CloudPickerReq):
+    project_id: str = Field(..., alias="projectId", min_length=1, max_length=200)
+
+
+class CloudCreateReq(CloudPickerReq):
+    name: str = Field(..., min_length=1, max_length=200)
+    default_branch: str = Field(..., alias="defaultBranch", min_length=1, max_length=200)
+
+
+class CloudTeleportReq(CloudSelectReq):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPushReq(BaseModel):
+    approved: StrictBool
+
+
+async def _cloud_call(sid: str, method: str, params: dict, timeout: float = 90.0) -> tuple[Any, str, Any]:
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        return bridge, esid, await bridge.call(method, {"sessionId": esid, **params}, timeout=timeout)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+
+
+@app.post("/api/sessions/{sid}/cloud/open")
+async def cloud_open(sid: str, r: CloudOpenReq) -> dict:
+    """Open the Vibe Code project picker for this session's git repository."""
+    params: dict[str, Any] = {"purpose": "teleport"}
+    if r.prompt:
+        params["prompt"] = r.prompt
+    return (await _cloud_call(sid, "vibeCode/projects/open", params))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/more")
+async def cloud_more(sid: str, r: CloudPickerReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/loadMore", {"pickerId": r.picker_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/select")
+async def cloud_select(sid: str, r: CloudSelectReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": r.project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/create")
+async def cloud_create(sid: str, r: CloudCreateReq) -> dict:
+    """Create a Vibe Code project for the repository and select it."""
+    _, _, created = await _cloud_call(sid, "vibeCode/projects/create", {
+        "pickerId": r.picker_id, "name": r.name, "defaultBranch": r.default_branch})
+    project_id = ((created or {}).get("project") or {}).get("projectId")
+    if not project_id:
+        return created
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/cancel")
+async def cloud_cancel(sid: str, r: CloudPickerReq) -> dict:
+    await _cloud_call(sid, "vibeCode/projects/cancel", {"pickerId": r.picker_id})
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport")
+async def cloud_teleport_start(sid: str, r: CloudTeleportReq) -> dict:
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        op = await _teleports.start(bridge, sid, esid, r.picker_id, r.project_id, r.prompt)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    store.audit("cloud.teleport", f"{sid} -> {r.project_id}")
+    return op.view()
+
+
+def _teleport_op(sid: str, op_id: str) -> cloud_teleport.TeleportOperation:
+    op = _teleports.get(sid, op_id)
+    if op is None:
+        raise HTTPException(404, "teleport operation not found")
+    return op
+
+
+@app.get("/api/sessions/{sid}/cloud/teleport/{op_id}")
+async def cloud_teleport_status(sid: str, op_id: str) -> dict:
+    return _teleport_op(sid, op_id).view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/push")
+async def cloud_teleport_push(sid: str, op_id: str, r: CloudPushReq) -> dict:
+    op = _teleport_op(sid, op_id)
+    if op.push is None:
+        raise HTTPException(409, "Teleport is not waiting for push approval")
+    await _cloud_call(sid, "vibeCode/teleport/push/respond", {"operationId": op.id, "approved": r.approved})
+    return op.view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/cancel")
+async def cloud_teleport_cancel(sid: str, op_id: str) -> dict:
+    op = _teleport_op(sid, op_id)
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        await _teleports.cancel(bridge, esid, op)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    return op.view()
 
 
 @app.get("/api/studio/costs")

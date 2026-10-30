@@ -57,6 +57,7 @@ export interface VibeModelInfo {
   thinkingLevels: string[];
   maxContextLength?: number | null;
   autoCompactThreshold?: number | null;
+  thinking?: string | null;
 }
 
 export interface Health {
@@ -163,6 +164,9 @@ export interface ModelInfo {
   functionCalling: boolean;
   vision: boolean;
   ownedBy: string;
+  /** Reasoning levels the vibe CLI accepts for this model, and its default. */
+  thinkingLevels?: string[];
+  defaultThinking?: string | null;
 }
 
 export interface SkillInfo {

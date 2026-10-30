@@ -1,7 +1,7 @@
 import * as React from "react";
 import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { AgentPicker, ModelPicker } from "./Pickers";
+import { AgentPicker, EffortPicker, ModelPicker } from "./Pickers";
 import { UsageMeter } from "./UsageMeter";
 
 /** Image attachment in the wire format the vibe app-server expects. */
@@ -49,7 +49,7 @@ export function Composer({
   running = false, disabled = false,
   placeholder = "Type / for quick access",
   model, onModelChange, agent, onAgentChange,
-  extraLeft, footer, className, sendError, contextTokens, sessionTokens,
+  extraLeft, footer, className, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -68,6 +68,8 @@ export function Composer({
   sendError?: string | null;
   contextTokens?: number | null;
   sessionTokens?: number | null;
+  reasoning?: string | null;
+  onReasoningChange?: (v: string | null) => void;
 }) {
   const taRef = React.useRef<HTMLTextAreaElement>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -177,6 +179,7 @@ export function Composer({
           <AgentPicker value={agent} onChange={onAgentChange} />
           <div className="flex-1" />
           <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} />
+          {onReasoningChange && <EffortPicker model={model} value={reasoning ?? null} onChange={onReasoningChange} />}
           <ModelPicker value={model} onChange={onModelChange} />
           {running ? (
             <button
