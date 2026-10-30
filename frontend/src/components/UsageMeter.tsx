@@ -151,14 +151,14 @@ export function UsageMeter({
         title={title}
         aria-label="Usage limits"
         aria-expanded={open}
-        className="h-7 w-7 shrink-0 grid place-items-center rounded-lg hover:bg-surface-muted transition-colors"
+        className="h-8 w-8 shrink-0 grid place-items-center rounded-md hover:bg-surface-muted transition-colors duration-75 ease-out"
       >
         <Ring percent={ringPercent} spinning={loading && !summary} />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 bottom-full mb-2 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised p-4 shadow-2xl animate-slide-up">
+          <div data-side="top" className="absolute right-0 bottom-full mb-2 z-50 w-80 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised p-4 shadow-lg">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-sm text-text">Plan usage limits</p>

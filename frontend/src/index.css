@@ -6,55 +6,61 @@
    Themes are variable sets keyed by <html data-theme="...">; "dark" is the default. */
 @layer base {
   :root {
-    --background: 240 4% 10%;
-    --foreground: 0 0% 95%;
-    --card: 240 3% 15%;
-    --card-foreground: 0 0% 95%;
-    --popover: 240 3% 15%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 16 100% 50%;
+    --background: 240 7% 11%;
+    --foreground: 0 0% 100%;
+    --card: 240 5% 16%;
+    --card-foreground: 0 0% 100%;
+    --popover: 240 5% 16%;
+    --popover-foreground: 0 0% 100%;
+    --primary: 16 96% 52%;
+    --primary-hover: 17 100% 58%;
+    --primary-press: 17 93% 45%;
     --primary-foreground: 0 0% 100%;
     --accent: 38 92% 55%;
     --accent-foreground: 30 80% 16%;
-    --muted: 240 3% 16%;
-    --muted-foreground: 0 0% 62%;
-    --text-faint: 0 0% 45%;
-    --border: 240 3% 19%;
-    --input: 0 0% 22%;
-    --destructive: 0 62% 45%;
-    --ring: 24 100% 50%;
-    --sidebar-background: 240 5% 9%;
-    --sidebar-border: 240 3% 14%;
-    --sidebar-accent: 240 5% 4%;
-    --send-bg: 0 0% 100%;
-    --send-fg: 0 0% 0%;
-    --radius: 0.75rem;
+    --muted: 240 4% 19%;
+    --muted-foreground: 240 5% 65%;
+    --text-faint: 240 4% 46%;
+    --border: 240 4% 21%;
+    --input: 240 3% 33%;
+    --destructive: 4 89% 67%;
+    --ring: 211 100% 51%;
+    --sidebar-background: 240 8% 10%;
+    --sidebar-border: 240 5% 14%;
+    --sidebar-accent: 240 18% 4%;
+    --code-background: 240 9% 7%;
+    --send-bg: 240 11% 98%;
+    --send-fg: 240 9% 7%;
+    --radius: 0.625rem;
     color-scheme: dark;
   }
 
-  /* Light — warm off-white paper + signature orange */
+  /* Light — Mistral's warm paper white with the signature orange */
   :root[data-theme="light"] {
-    --background: 40 30% 97%;
-    --foreground: 0 0% 10%;
+    --background: 60 23% 98%;
+    --foreground: 45 7% 12%;
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 10%;
+    --card-foreground: 45 7% 12%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 10%;
-    --primary: 24 100% 50%;
+    --popover-foreground: 45 7% 12%;
+    --primary: 16 96% 52%;
+    --primary-hover: 17 100% 58%;
+    --primary-press: 17 93% 45%;
     --primary-foreground: 0 0% 100%;
-    --accent: 38 92% 42%;
+    --accent: 32 95% 40%;
     --accent-foreground: 0 0% 100%;
-    --muted: 40 20% 91%;
-    --muted-foreground: 0 0% 38%;
-    --text-faint: 0 0% 45%;
-    --border: 35 15% 84%;
-    --input: 35 15% 76%;
-    --destructive: 0 62% 45%;
-    --ring: 24 100% 50%;
-    --sidebar-background: 40 25% 94%;
-    --sidebar-border: 35 15% 84%;
-    --sidebar-accent: 40 20% 89%;
-    --send-bg: 0 0% 7%;
+    --muted: 60 5% 92%;
+    --muted-foreground: 48 5% 36%;
+    --text-faint: 45 5% 55%;
+    --border: 60 4% 88%;
+    --input: 60 2% 73%;
+    --destructive: 4 70% 48%;
+    --ring: 211 100% 51%;
+    --sidebar-background: 45 25% 96%;
+    --sidebar-border: 45 10% 90%;
+    --sidebar-accent: 48 9% 90%;
+    --code-background: 50 18% 95%;
+    --send-bg: 240 7% 11%;
     --send-fg: 0 0% 100%;
     color-scheme: light;
   }
@@ -115,6 +121,7 @@
 
 
   :root[data-theme="forest"] {
+    --primary-hover: 158 55% 60%; --primary-press: 158 55% 60%;
     --background: 145 22% 8%; --foreground: 145 22% 95%;
     --card: 145 16% 12%; --card-foreground: 145 22% 95%;
     --popover: 145 16% 12%; --popover-foreground: 145 22% 95%;
@@ -125,6 +132,7 @@
     --sidebar-background: 145 22% 7%; --sidebar-border: 145 13% 20%; --sidebar-accent: 145 14% 16%;
   }
   :root[data-theme="plum"] {
+    --primary-hover: 270 80% 75%; --primary-press: 270 80% 75%;
     --background: 270 18% 10%; --foreground: 270 22% 96%;
     --card: 270 20% 17%; --card-foreground: 270 22% 96%;
     --popover: 270 20% 17%; --popover-foreground: 270 22% 96%;
@@ -135,6 +143,7 @@
     --sidebar-background: 270 18% 8%; --sidebar-border: 270 16% 23%; --sidebar-accent: 270 16% 18%;
   }
   :root[data-theme="contrast"] {
+    --primary-hover: 39 100% 60%; --primary-press: 39 100% 60%;
     --background: 0 0% 0%; --foreground: 0 0% 100%;
     --card: 0 0% 5%; --card-foreground: 0 0% 100%;
     --popover: 0 0% 5%; --popover-foreground: 0 0% 100%;
@@ -172,7 +181,8 @@
   *::-webkit-scrollbar-thumb {
     background: hsl(var(--border));
     border-radius: 8px;
-    border: 2px solid hsl(var(--background));
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   *::-webkit-scrollbar-thumb:hover {
     background: hsl(var(--input));
@@ -183,27 +193,39 @@
   }
 
   :focus-visible {
-    outline: 2px solid hsl(var(--ring));
+    outline: 2px solid hsl(var(--ring) / 0.5);
     outline-offset: 2px;
   }
 }
 
-/* The round send/stop button — white-on-dark in dark themes, inverted in light.
-   Unlayered so this transition (which includes opacity, unlike the
-   transition-colors utility) wins and the hover dims smoothly. */
+/* Mistral's icon set is drawn with square caps and mitred joins; give the
+   lucide icons the same squared-off strokes. Unlayered: Tailwind would purge
+   it from a layer, since the class is added at runtime. */
+svg.lucide {
+  stroke-linecap: square;
+  stroke-linejoin: miter;
+}
+
+/* The square send/stop button — near-white in dark themes, inverted in light,
+   with the webapp's pressed-key inset shadow. Unlayered so this transition
+   (which includes opacity and scale) wins over transition-colors. */
 .vd-send {
   background: hsl(var(--send-bg));
   color: hsl(var(--send-fg));
-  transition: opacity 160ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+  box-shadow: inset 0 -1.5px 0 rgb(0 0 0 / 0.08);
+  transition: opacity 75ms ease-out, background-color 75ms ease-out, color 75ms ease-out, scale 75ms ease-out;
 }
 .vd-send:hover {
-  opacity: 0.88;
+  opacity: 0.9;
+}
+.vd-send:active {
+  scale: 0.96;
 }
 
 /* Markdown content inside assistant messages */
 @layer components {
   .prose-vd {
-    @apply text-[15px] leading-relaxed text-text;
+    @apply text-base leading-6 text-text;
   }
   .prose-vd p { @apply my-2 first:mt-0 last:mb-0; }
   .prose-vd ul { @apply list-disc pl-5 my-2 space-y-1; }
@@ -212,9 +234,9 @@
   .prose-vd h1, .prose-vd h2, .prose-vd h3, .prose-vd h4 {
     @apply font-semibold text-text mt-4 mb-2 first:mt-0;
   }
-  .prose-vd h1 { @apply text-xl; }
-  .prose-vd h2 { @apply text-lg; }
-  .prose-vd h3 { @apply text-base; }
+  .prose-vd h1 { @apply text-2xl; }
+  .prose-vd h2 { @apply text-xl leading-[30px]; }
+  .prose-vd h3 { @apply text-lg; }
   .prose-vd a { @apply text-primary underline underline-offset-2; }
   .prose-vd strong { @apply font-semibold text-text; }
   .prose-vd blockquote {
@@ -225,11 +247,10 @@
   .prose-vd th { @apply text-left font-medium text-text-muted border border-border px-2 py-1; }
   .prose-vd td { @apply border border-border px-2 py-1 align-top; }
   .prose-vd :not(pre) > code {
-    @apply font-mono text-[13px] bg-surface-muted px-1.5 py-0.5 rounded;
-    color: hsl(var(--accent));
+    @apply font-mono text-[0.85em] bg-surface-muted px-1 py-0.5 rounded-md;
   }
   .prose-vd pre {
-    @apply font-mono text-[13px] bg-[#0d0b09] border border-border rounded-lg p-3 my-3 overflow-x-auto;
+    @apply font-mono text-[13px] bg-code border border-border rounded-xl p-4 my-3 overflow-x-auto;
   }
   .prose-vd pre code {
     @apply bg-transparent p-0;
@@ -250,7 +271,67 @@
 }
 
 dialog[open] {
-  animation: vd-reveal 160ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  animation: vd-menu-in 150ms ease backwards;
+}
+
+/* Popover menus: fade + zoom from 95% + an 8px slide away from the trigger,
+   reversed on close (data-state="closed" while the exit plays). */
+@keyframes vd-menu-in {
+  from { opacity: 0; transform: translateY(var(--vd-menu-shift, 0)) scale(0.95); }
+}
+@keyframes vd-menu-out {
+  to { opacity: 0; transform: translateY(var(--vd-menu-shift, 0)) scale(0.95); }
+}
+.vd-menu {
+  --vd-menu-shift: -8px;
+  transform-origin: top;
+  animation: vd-menu-in 150ms ease;
+}
+.vd-menu[data-side="top"] {
+  --vd-menu-shift: 8px;
+  transform-origin: bottom;
+}
+.vd-menu[data-state="closed"] {
+  animation: vd-menu-out 150ms ease forwards;
+  pointer-events: none;
+}
+
+/* Disclosure rows (tool calls, reasoning): chevron sits at 40% until hover. */
+.vd-disclosure-chevron {
+  opacity: 0.4;
+  transition: opacity 150ms ease, transform 200ms ease-out;
+}
+.group:hover .vd-disclosure-chevron,
+.group:focus-visible .vd-disclosure-chevron {
+  opacity: 1;
+  transition-duration: 300ms, 200ms;
+}
+
+/* Animated grid-rows expand for disclosure bodies. */
+.vd-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms cubic-bezier(0, 0, 0, 1);
+}
+.vd-collapse[data-open="true"] {
+  grid-template-rows: 1fr;
+}
+.vd-collapse > * {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Shimmer sweep across the label of a running step. */
+@keyframes vd-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+.vd-shimmer {
+  background: linear-gradient(90deg, currentColor 40%, hsl(var(--foreground)) 50%, currentColor 60%) 0 0 / 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: vd-shimmer 1.4s linear infinite;
 }
 
 /* three-dot "working" indicator while a turn runs */

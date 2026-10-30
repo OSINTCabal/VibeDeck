@@ -192,17 +192,17 @@ export function ProjectPicker({
         onClick={() => { setOpen((o) => !o); setQ(""); }}
         title={cwd || "Select project"}
         aria-label="Select project directory"
-        className="flex items-center gap-1 h-7 max-w-[180px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+        className="flex items-center gap-1.5 h-8 max-w-[180px] rounded-md px-2.5 text-sm text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out"
       >
-        <FolderOpen size={12} className="shrink-0" />
-        <span className="truncate font-mono text-xs">{cwd ? baseName(cwd) : "Select project"}</span>
-        <ChevronDown size={11} className="shrink-0" />
+        <FolderOpen size={16} className="shrink-0" />
+        <span className="hidden truncate sm:inline">{cwd ? baseName(cwd) : "Select project"}</span>
+        <ChevronDown size={14} className="shrink-0 opacity-60" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={cn(
-            "absolute left-0 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up",
+          <div data-side={placement === "up" ? "top" : "bottom"} className={cn(
+            "absolute left-0 z-50 w-80 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
           )}>
             <div className="flex items-center gap-2 px-3 border-b border-border">

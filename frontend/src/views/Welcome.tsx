@@ -117,9 +117,9 @@ export function Welcome() {
       >
         {/* centered block: logo, greeting, composer */}
         <div className="my-auto w-full max-w-3xl mx-auto px-6 py-8">
-          <MistralLogo size={40} className="vd-reveal mb-5" />
+          <MistralLogo size={48} className="vd-reveal mb-6 ml-5" />
           <h1
-            className="text-[30px] font-medium tracking-tight text-text mb-6 vd-reveal"
+            className="px-5 text-[32px] leading-10 font-normal text-text mb-5 vd-reveal"
             style={{ animationDelay: "70ms" }}
           >
             {lane === "work"
@@ -158,19 +158,19 @@ export function Welcome() {
                 <button
                   key={c.label}
                   onClick={() => setText(c.label)}
-                  className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-text-muted transition-colors hover:bg-surface-muted hover:text-text vd-reveal"
+                  className="flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-text-muted transition-colors hover:bg-surface-muted hover:text-text vd-reveal"
                   style={{ animationDelay: `${210 + i * 60}ms` }}
                 >
-                  <c.icon size={13} className="shrink-0" />
+                  <c.icon size={16} className="shrink-0" />
                   {c.label}
                 </button>
               ))}
               <button
                 onClick={() => setText("")}
-                className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-text-faint transition-colors hover:bg-surface-muted hover:text-text-muted vd-reveal"
+                className="flex h-8 items-center gap-2 rounded-md px-2.5 text-sm text-text-faint transition-colors hover:bg-surface-muted hover:text-text-muted vd-reveal"
                 style={{ animationDelay: "390ms" }}
               >
-                <MoreHorizontal size={13} className="shrink-0" />
+                <MoreHorizontal size={16} className="shrink-0" />
                 Discover more
               </button>
             </div>
@@ -185,7 +185,7 @@ export function Welcome() {
                 <button
                   key={c.label}
                   onClick={() => setText(c.label)}
-                  className="flex-1 min-w-[200px] rounded-xl border border-border bg-surface px-4 py-3.5 text-left transition-colors hover:border-border-strong hover:bg-surface-raised hover:text-text text-text-muted vd-reveal"
+                  className="flex-1 min-w-[200px] rounded-xl border border-border px-4 py-3.5 text-left text-text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-text vd-reveal"
                   style={{ animationDelay: `${210 + i * 70}ms` }}
                 >
                   <c.icon size={16} className="block mb-2.5" />

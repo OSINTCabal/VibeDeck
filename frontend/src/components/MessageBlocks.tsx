@@ -2,8 +2,8 @@ import * as React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  User, Bot, Brain, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
-  Loader2, Check, X, Sparkles,
+  Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
+  Loader2, X, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge } from "./ui";
@@ -46,38 +46,62 @@ function toolOutput(e: HistoryEntry): string {
 
 export function MessageEntry({ e }: { e: HistoryEntry }) {
   const isUser = e.role === "user";
-  return (
-    <div className={cn(
-      "flex gap-3 px-6 py-3 vd-reveal",
-      isUser && "bg-surface/50 rounded-lg my-1",
-    )}>
-      <div
-        className={cn(
-          "mt-0.5 h-7 w-7 shrink-0 rounded-full grid place-items-center",
-          isUser ? "bg-surface-muted text-text-muted" : "bg-primary/15 text-primary",
-        )}
-      >
-        {isUser ? <User size={15} /> : <Bot size={15} />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="text-xs font-medium text-text-muted mb-1">
-          {isUser ? "You" : "Vibe"}
+  const images = (e.content || []).map((content, i) => {
+    const attachment = content.attachment as any;
+    const url = attachment?.source?.kind === "inline" ? `data:${attachment.mimeType};base64,${attachment.source.data}` : null;
+    return content.type === "image" && typeof url === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(url)
+      ? <img key={i} src={url} alt={attachment?.alias || "Attached image"} className="mb-2 max-h-64 max-w-full rounded-lg" /> : null;
+  });
+  // User turns are a right-aligned pill; assistant turns are plain markdown —
+  // no avatars, like the webapp. The speaker stays available to screen readers.
+  if (isUser) {
+    return (
+      <div className="flex justify-end px-6 py-3 vd-reveal">
+        <div className="flex w-fit max-w-[85%] min-w-0 flex-col rounded-3xl bg-surface-muted/70 px-5 py-3">
+          <span className="sr-only">You:</span>
+          {images}
+          <div className="whitespace-pre-wrap break-words text-base leading-6">{entryText(e)}</div>
         </div>
-        {(e.content || []).map((content, i) => {
-          const attachment = content.attachment as any;
-          const url = attachment?.source?.kind === "inline" ? `data:${attachment.mimeType};base64,${attachment.source.data}` : null;
-          return content.type === "image" && typeof url === "string" && /^data:image\/(png|jpeg|webp|gif);base64,/.test(url)
-            ? <img key={i} src={url} alt={attachment?.alias || "Attached image"} className="mb-2 max-h-64 max-w-full rounded-lg" /> : null;
-        })}
-        {isUser ? (
-          <div className="whitespace-pre-wrap text-[15px] leading-relaxed">{entryText(e)}</div>
-        ) : (
-          <div className="prose-vd">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{entryText(e)}</ReactMarkdown>
-          </div>
-        )}
+      </div>
+    );
+  }
+  return (
+    <div className="px-6 py-3 vd-reveal">
+      <span className="sr-only">Vibe:</span>
+      {images}
+      <div className="prose-vd">
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{entryText(e)}</ReactMarkdown>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------- Disclosure row
+
+/** A muted 14px row with a trailing chevron that brightens on hover — the
+ *  webapp's collapsible step header (tool calls, reasoning). */
+function DisclosureRow({
+  open, onToggle, controls, icon: Icon, label, detail, busy = false, trailing,
+}: {
+  open: boolean; onToggle: () => void; controls: string; icon: React.ElementType;
+  label: string; detail?: string; busy?: boolean; trailing?: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={controls}
+      onClick={onToggle}
+      className="group flex h-6 w-full min-w-0 items-center gap-2 text-left text-sm font-medium text-text-muted transition-colors hover:text-text"
+    >
+      <Icon size={16} className="shrink-0" />
+      <span className="flex min-w-0 items-baseline gap-2">
+        <span className={cn("shrink-0", busy && "vd-shimmer")}>{label}</span>
+        {detail && <span className="min-w-0 truncate font-mono text-[13px] font-normal">{detail}</span>}
+      </span>
+      {trailing}
+      <ChevronRight size={16} className={cn("vd-disclosure-chevron shrink-0", open && "rotate-90")} />
+    </button>
   );
 }
 
@@ -89,24 +113,16 @@ export function ReasoningBlock({ e, defaultExpanded = false }: { e: HistoryEntry
   const text = e.text || "";
   const streaming = e.generationStatus === "in_progress";
   return (
-    <div className="px-6 py-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={contentId}
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-2 text-xs text-text-muted hover:text-text transition-colors"
-      >
-        <ChevronRight size={13} className={cn("transition-transform", open && "rotate-90")} />
-        <Brain size={13} className="text-accent" />
-        <span>{streaming ? "Thinking…" : "Thought process"}</span>
-        {streaming && <Loader2 size={12} className="animate-spin" />}
-      </button>
-      {open && (
-        <div id={contentId} className="mt-1 ml-5 pl-3 border-l border-border text-sm text-text-muted whitespace-pre-wrap leading-relaxed animate-fade-in">
-          {text || <span className="text-text-faint">…</span>}
+    <div className="px-6 py-1.5">
+      <DisclosureRow open={open} onToggle={() => setOpen((v) => !v)} controls={contentId}
+        icon={Lightbulb} label={streaming ? "Thinking…" : "Thought process"} busy={streaming} />
+      <div className="vd-collapse" data-open={open}>
+        <div id={contentId} aria-hidden={!open} ref={node => node?.toggleAttribute("inert", !open)}>
+          <div className="mt-2 ml-2 border-l border-border pl-4 text-sm leading-6 text-text-muted whitespace-pre-wrap">
+            {text || <span className="text-text-faint">…</span>}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -121,6 +137,7 @@ const toolIcon = (name: string) => {
 
 export function ToolCallBlock({ e }: { e: HistoryEntry }) {
   const [open, setOpen] = React.useState(false);
+  const contentId = React.useId();
   const d: any = e.detail || {};
   const st: any = e.state || {};
   const name = d?.toolName || e.title || "tool";
@@ -128,52 +145,45 @@ export function ToolCallBlock({ e }: { e: HistoryEntry }) {
   const status = st.status || "running";
   const output = toolOutput(e);
   const input = toolInput(e);
+  const running = status === "running" || status === "in_progress";
+  const failed = status === "failed" || status === "error";
   return (
-    <div className="px-6 py-1">
-      <div className="rounded-lg border border-border bg-surface/60">
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-surface-muted/40"
-        >
-          <Icon size={14} className="text-text-muted shrink-0" />
-          <span className="font-mono text-xs text-text-muted truncate flex-1">{name}</span>
-          <span className="text-xs text-text-faint truncate max-w-[45%] hidden sm:block">
-            {toolSummary(e)}
-          </span>
-          <StatusDot status={status} />
-        </button>
-        {open && (
-          <div className="border-t border-border px-3 py-2.5 space-y-2 animate-fade-in">
+    <div className="px-6 py-1.5">
+      <DisclosureRow open={open} onToggle={() => setOpen((v) => !v)} controls={contentId}
+        icon={Icon} label={name} detail={toolSummary(e)} busy={running}
+        trailing={<StatusMark status={status} />} />
+      <div className="vd-collapse" data-open={open}>
+        <div id={contentId} aria-hidden={!open} ref={node => node?.toggleAttribute("inert", !open)}>
+          <div className={cn("mt-2 ml-6 space-y-2", failed && "text-danger")}>
             {input && (
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-text-faint mb-1">Input</div>
-                <pre className="font-mono text-xs bg-[#0d0b09] rounded-md p-2 overflow-x-auto text-text-muted">{input}</pre>
+                <div className="text-xs font-medium text-text-faint mb-1">Input</div>
+                <pre className="font-mono text-xs bg-code border border-border rounded-lg p-3 overflow-x-auto text-text-muted">{input}</pre>
               </div>
             )}
             {output && (
               <div>
-                <div className="text-[11px] uppercase tracking-wide text-text-faint mb-1">Output</div>
-                <pre className="font-mono text-xs bg-[#0d0b09] rounded-md p-2 overflow-x-auto max-h-60 text-text-muted whitespace-pre-wrap">{output}</pre>
+                <div className="text-xs font-medium text-text-faint mb-1">Output</div>
+                <pre className="font-mono text-xs bg-code border border-border rounded-lg p-3 overflow-x-auto max-h-60 text-text-muted whitespace-pre-wrap">{output}</pre>
               </div>
             )}
             {!input && !output && (
               <div className="text-xs text-text-faint">No details.</div>
             )}
           </div>
-        )}
+        </div>
       </div>
     </div>
   );
 }
 
-function StatusDot({ status }: { status: string }) {
+/** Finished steps stay quiet; only running and failed steps get a mark. */
+function StatusMark({ status }: { status: string }) {
   if (status === "running" || status === "in_progress")
-    return <Loader2 size={13} className="animate-spin text-primary shrink-0" />;
-  if (status === "completed" || status === "succeeded" || status === "success")
-    return <Check size={13} className="text-success shrink-0" />;
+    return <Loader2 size={14} aria-label="Running" className="animate-spin text-text-faint shrink-0" />;
   if (status === "failed" || status === "error")
-    return <X size={13} className="text-danger shrink-0" />;
-  return <span className="h-2 w-2 rounded-full bg-text-faint shrink-0" />;
+    return <X size={14} aria-label="Failed" className="text-danger shrink-0" />;
+  return null;
 }
 
 // ---------------------------------------------------------------- Approval card
@@ -205,21 +215,21 @@ export function ApprovalCard({
 
   return (
     <div className="px-6 py-2">
-      <div className="rounded-lg border border-accent/40 bg-accent/5 px-4 py-3 animate-fade-in">
-        <div className="flex items-start gap-2.5">
-          <ShieldCheck size={16} className="text-accent mt-0.5 shrink-0" />
+      <div className="rounded-xl border border-border bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgb(0_0_0/0.12)] animate-fade-in">
+        <div className="flex items-start gap-3">
+          <ShieldCheck size={16} className="text-primary mt-0.5 shrink-0" />
           <div className="min-w-0 flex-1">
             <div className="text-sm font-medium text-text">
               {open ? "Approval required" : answered ? "Approval resolved" : e.title || "Approval"}
             </div>
-            <div className="text-xs text-text-muted mt-0.5 font-mono break-all">
+            <div className="text-[13px] text-text-muted mt-1 font-mono break-all">
               {effect ? toolSummary(effect) : e.title}
             </div>
             {reason && <div className="text-xs text-text-faint mt-1">{reason}</div>}
             {open && (
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 {choices.map(choice => <button key={choice} disabled={busy !== null} onClick={() => void act(choice)}
-                  className={cn("h-8 px-3 rounded-md border border-border text-xs transition-colors disabled:opacity-50", choice === "approve" ? "bg-primary text-primary-foreground" : "text-text-muted hover:bg-surface-muted")}>
+                  className={cn("h-8 px-3 rounded-md text-sm font-medium transition-colors duration-75 ease-out disabled:opacity-50", choice === "approve" ? "vd-send" : "border border-border text-text hover:bg-surface-muted")}>
                   {busy === choice ? "Sending…" : ({ approve: "Approve", approve_for_session: "Approve for session", approve_permanently: "Always approve", deny: "Deny", cancel_turn: "Cancel turn" } as Record<string, string>)[choice] || choice}
                 </button>)}
               </div>
@@ -259,7 +269,7 @@ export function QuestionCard({ e, onResolve }: {
       })) });
     } catch (err) { setError(String(err)); } finally { setBusy(false); }
   };
-  return <div className="px-6 py-2"><div className="rounded-lg border border-accent/40 bg-accent/5 p-4">
+  return <div className="px-6 py-2"><div className="rounded-xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgb(0_0_0/0.12)]">
     <h3 className="text-sm font-medium">{open ? "Vibe needs your input" : "Input resolved"}</h3>
     {open && <form onSubmit={event => { event.preventDefault(); void submit(false); }} className="mt-3 space-y-4">
       {questions.map((q: any, i: number) => <fieldset key={i} disabled={busy} className="space-y-2">
@@ -269,9 +279,9 @@ export function QuestionCard({ e, onResolve }: {
             onChange={event => setSelected(s => ({ ...s, [i]: q.multiSelect ? event.target.checked ? [...(s[i] || []), option.label] : (s[i] || []).filter(v => v !== option.label) : [option.label] }))} />
           <span>{option.label}{option.description && <span className="block text-xs text-text-faint">{option.description}</span>}</span>
         </label>)}
-        {(!q.hideOther || !q.options?.length) && <input aria-label={`Your answer: ${q.question}`} value={other[i] || ""} onChange={event => setOther(s => ({ ...s, [i]: event.target.value }))} placeholder="Your answer" className="w-full rounded-md border border-border bg-surface p-2 text-sm" />}
+        {(!q.hideOther || !q.options?.length) && <input aria-label={`Your answer: ${q.question}`} value={other[i] || ""} onChange={event => setOther(s => ({ ...s, [i]: event.target.value }))} placeholder="Your answer" className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:border-border-strong" />}
       </fieldset>)}
-      <div className="flex gap-2"><button disabled={busy || questions.some((_: unknown, i: number) => !selected[i]?.length && !other[i]?.trim())} className="rounded-md bg-primary px-3 py-2 text-xs text-primary-foreground disabled:opacity-50">{busy ? "Sending…" : "Submit answers"}</button><button type="button" disabled={busy} onClick={() => void submit(true)} className="px-3 py-2 text-xs text-text-muted">Cancel</button></div>
+      <div className="flex gap-2"><button disabled={busy || questions.some((_: unknown, i: number) => !selected[i]?.length && !other[i]?.trim())} className="vd-send h-8 rounded-md px-3 text-sm font-medium disabled:opacity-50">{busy ? "Sending…" : "Submit answers"}</button><button type="button" disabled={busy} onClick={() => void submit(true)} className="h-8 rounded-md px-3 text-sm text-text-muted transition-colors hover:bg-surface-muted hover:text-text">Cancel</button></div>
     </form>}
     {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
   </div></div>;
@@ -282,9 +292,9 @@ export function QuestionCard({ e, onResolve }: {
 export function NoticeBlock({ e }: { e: HistoryEntry }) {
   const d: any = e.detail || {};
   return (
-    <div className="px-6 py-1">
-      <div className="flex items-center gap-2 text-xs text-text-faint">
-        <Sparkles size={12} />
+    <div className="px-6 py-1.5">
+      <div className="flex items-center gap-2 text-sm text-text-faint">
+        <Sparkles size={16} />
         <span>{d?.title || e.title || "notice"}</span>
       </div>
     </div>

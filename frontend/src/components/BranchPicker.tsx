@@ -59,17 +59,17 @@ export function BranchPicker({ cwd, className }: { cwd: string; className?: stri
         onClick={() => { setOpen((o) => !o); setQ(""); setError(null); }}
         title={`Branch ${info.current || "(detached)"}${info.dirty ? " · uncommitted changes" : ""}`}
         aria-label="Select git branch"
-        className="flex items-center gap-1 h-7 max-w-[160px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+        className="flex items-center gap-1.5 h-8 max-w-[160px] rounded-md px-2.5 text-sm text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out"
       >
-        <GitBranch size={12} className="shrink-0" />
-        <span className="truncate font-mono text-xs">{info.current || "detached"}</span>
+        <GitBranch size={16} className="shrink-0" />
+        <span className="hidden truncate sm:inline">{info.current || "detached"}</span>
         {info.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Uncommitted changes" />}
-        <ChevronDown size={11} className="shrink-0" />
+        <ChevronDown size={14} className="shrink-0 opacity-60" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 bottom-full mb-2 z-50 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up">
+          <div data-side="top" className="absolute left-0 bottom-full mb-2 z-50 w-72 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden">
             <div className="flex items-center gap-2 px-3 border-b border-border">
               <Search size={13} className="text-text-faint shrink-0" />
               <input
