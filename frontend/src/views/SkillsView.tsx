@@ -2,7 +2,8 @@ import * as React from "react";
 import { Link } from "react-router-dom";
 import { getSkills, setSharedSkills } from "@/lib/api";
 import { Button, Card, CardBody, Badge, Spinner, Input } from "@/components/ui";
-import { Puzzle, RefreshCw } from "lucide-react";
+import { Download, Puzzle, RefreshCw } from "lucide-react";
+import { ImportSkillsDialog } from "@/components/ImportSkillsDialog";
 import type { SkillInfo } from "@/lib/types";
 
 export function SkillsView() {
@@ -14,6 +15,8 @@ export function SkillsView() {
   const [error, setError] = React.useState("");
   const [q, setQ] = React.useState("");
   const [revision, setRevision] = React.useState(0);
+  const [importing, setImporting] = React.useState(false);
+  const [notice, setNotice] = React.useState("");
   React.useEffect(() => {
     let closed = false;
     setLoading(true); setError("");
@@ -32,7 +35,8 @@ export function SkillsView() {
       <div className="flex items-center gap-2 mb-1">
         <Puzzle size={16} className="text-primary" />
         <h2 className="text-base font-semibold">Skills</h2>
-        <Button variant="ghost" size="sm" className="ml-auto" aria-label={error ? "Retry loading skills" : "Refresh skills"} disabled={loading || saving} onClick={() => setRevision(value => value + 1)}><RefreshCw size={14} />{error ? "Retry" : "Refresh"}</Button>
+        <Button variant="outline" size="sm" className="ml-auto" disabled={loading} onClick={() => setImporting(true)}><Download size={14} />Import</Button>
+        <Button variant="ghost" size="sm" aria-label={error ? "Retry loading skills" : "Refresh skills"} disabled={loading || saving} onClick={() => setRevision(value => value + 1)}><RefreshCw size={14} />{error ? "Retry" : "Refresh"}</Button>
       </div>
       <p className="text-xs text-text-muted mb-4">
         Skills the agent can load — managed in <code className="font-mono">{dir}</code>
@@ -48,6 +52,7 @@ export function SkillsView() {
         <p className="text-xs text-text-muted">Uses Vibe’s experimental skill registry with your Mistral API credentials. Applies to new sessions in both apps. Google sign-in alone does not authorize the CLI registry. Local skills stay on this device.</p>
         <Link to="/workspace/skills" className="inline-block text-sm text-primary hover:underline">Manage web workspace skills</Link>
       </div>
+      {notice && <p role="status" className="mb-3 text-sm text-success">{notice}</p>}
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
       <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter skills…" className="max-w-sm mb-4" />
       {loading && <div className="text-text-muted text-sm flex items-center gap-2"><Spinner /> Loading…</div>}
@@ -63,8 +68,17 @@ export function SkillsView() {
             </CardBody>
           </Card>
         ))}
-        {!loading && !error && filtered.length === 0 && <div className="text-text-faint text-sm">{q ? "No matching skills." : "No skills found."}</div>}
+        {!loading && !error && filtered.length === 0 && (
+          <div className="text-text-faint text-sm">
+            {q ? "No matching skills." : <>No skills found. <button type="button" className="text-primary hover:underline" onClick={() => setImporting(true)}>Import from Claude Code, Codex or a folder</button></>}
+          </div>
+        )}
       </div>
+      <ImportSkillsDialog open={importing} onClose={() => setImporting(false)} onImported={result => {
+        const names = result.imported.map(item => item.name);
+        setNotice(`Imported ${names.length === 1 ? names[0] : `${names.length} skills`}. New sessions can use ${names.length === 1 ? "it" : "them"}.`);
+        setRevision(value => value + 1);
+      }} />
     </div>
   );
 }

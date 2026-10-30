@@ -38,6 +38,7 @@ import cloud_teleport
 import git_projects
 import httpx
 import providers as provider_config
+import skill_import
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
 from agent_routing import write_settings as write_agent_settings
@@ -1494,6 +1495,59 @@ async def get_skills(sid: Optional[str] = Query(None)) -> dict:
         except BridgeError:
             out["installed"] = None
     return out
+
+
+class SkillImportItem(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    overwrite: StrictBool = False
+
+
+class SkillImportRequest(BaseModel):
+    items: list[SkillImportItem] = Field(min_length=1, max_length=500)
+    projects: list[str] = Field(default_factory=list, max_length=100)
+    paths: list[str] = Field(default_factory=list, max_length=20)
+
+
+@app.get("/api/skills/importable")
+async def get_importable_skills(project: list[str] = Query([]), path: list[str] = Query([])) -> dict:
+    """Skills installed for other agents (Claude Code, Codex, project folders, chosen paths)."""
+    try:
+        sources = await asyncio.to_thread(skill_import.scan, project, path)
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    return skill_import.serialize(sources)
+
+
+@app.post("/api/skills/import/upload")
+async def upload_skill(request: Request, filename: str = Query("SKILL.md", max_length=255)) -> dict:
+    """Unpack an uploaded SKILL.md or zip into a staging folder and list what it holds."""
+    if int(request.headers.get("content-length") or 0) > skill_import.MAX_BYTES:
+        raise HTTPException(413, "File is larger than 25 MB")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "The file is empty")
+    try:
+        staged = await asyncio.to_thread(skill_import.stage_upload, data, filename, DATA_DIR / "skill-uploads")
+        sources = await asyncio.to_thread(skill_import.scan, [], [str(staged)])
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    out = skill_import.serialize([source for source in sources if source.root == staged])
+    out["path"] = str(staged)
+    return out
+
+
+@app.post("/api/skills/import")
+async def import_skills(body: SkillImportRequest) -> dict:
+    """Copy the chosen skills into $VIBE_HOME/skills; existing ones only with overwrite."""
+    try:
+        result = await asyncio.to_thread(skill_import.import_selected,
+                                         [(item.id, item.overwrite) for item in body.items],
+                                         body.projects, body.paths)
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    if result["imported"]:
+        store.audit("skills.import", ", ".join(item["name"] for item in result["imported"]))
+    return result
 
 
 @app.get("/api/workspace/{kind}")

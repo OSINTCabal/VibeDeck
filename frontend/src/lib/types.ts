@@ -175,6 +175,37 @@ export interface SkillInfo {
   size: number;
 }
 
+export interface ImportableSkill {
+  id: string;
+  name: string;
+  dirName: string;
+  description: string;
+  path: string;
+  /** new: not in ~/.vibe/skills; imported: identical copy there; conflict: another skill uses the name. */
+  status: "new" | "imported" | "conflict" | "invalid";
+  /** Frontmatter is rewritten on import so Vibe accepts it. */
+  converted: boolean;
+  error: string | null;
+}
+
+export interface ImportableSkillSource {
+  id: string;
+  label: string;
+  root: string;
+  note: string | null;
+  skills: ImportableSkill[];
+}
+
+export interface ImportableSkills {
+  dest: string;
+  sources: ImportableSkillSource[];
+}
+
+export interface SkillImportResult {
+  imported: { id: string; name: string; path: string }[];
+  failed: { id: string; name: string | null; error: string }[];
+}
+
 export interface McpServerInfo {
   name: string;
   transport?: string;

@@ -1,6 +1,6 @@
 import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
-  McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
+  McpServerInfo, AgentInfo, ImportableSkills, SkillImportResult, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
   StudioCosts,
 } from "./types";
@@ -114,6 +114,18 @@ export const getSkills = (sid?: string) =>
   http<{ skills: SkillInfo[]; dir: string; sharedEnabled: boolean; installed?: unknown }>(`/api/skills${sid ? `?sid=${sid}` : ""}`);
 export const setSharedSkills = (enabled: boolean) =>
   http<{ enabled: boolean }>("/api/skills/shared", { method: "PUT", body: JSON.stringify({ enabled }) });
+export const getImportableSkills = (projects: string[], paths: string[]) => {
+  const query = new URLSearchParams();
+  projects.forEach(project => query.append("project", project));
+  paths.forEach(path => query.append("path", path));
+  return http<ImportableSkills>(`/api/skills/importable?${query}`);
+};
+export const uploadSkill = (file: File) =>
+  http<ImportableSkills & { path: string }>(`/api/skills/import/upload?filename=${encodeURIComponent(file.name)}`, {
+    method: "POST", body: file, headers: { "Content-Type": "application/octet-stream" },
+  });
+export const importSkills = (body: { items: { id: string; overwrite: boolean }[]; projects: string[]; paths: string[] }) =>
+  http<SkillImportResult>("/api/skills/import", { method: "POST", body: JSON.stringify(body) });
 export const getMcp = (sid?: string) =>
   http<{ servers: McpServerInfo[]; live?: unknown }>(`/api/mcp${sid ? `?sid=${sid}` : ""}`);
 export const getAgents = () => http<{ agents: AgentInfo[]; dir: string }>("/api/agents");
