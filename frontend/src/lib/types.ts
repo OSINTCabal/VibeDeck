@@ -55,6 +55,9 @@ export interface VibeModelInfo {
   name: string;
   supportsImages: boolean;
   thinkingLevels: string[];
+  maxContextLength?: number | null;
+  autoCompactThreshold?: number | null;
+  thinking?: string | null;
 }
 
 export interface Health {
@@ -161,12 +164,46 @@ export interface ModelInfo {
   functionCalling: boolean;
   vision: boolean;
   ownedBy: string;
+  /** Reasoning levels the vibe CLI accepts for this model, and its default. */
+  thinkingLevels?: string[];
+  defaultThinking?: string | null;
 }
 
 export interface SkillInfo {
   name: string;
   path: string;
   size: number;
+}
+
+export interface ImportableSkill {
+  id: string;
+  name: string;
+  dirName: string;
+  description: string;
+  path: string;
+  /** new: not in ~/.vibe/skills; imported: identical copy there; conflict: another skill uses the name. */
+  status: "new" | "imported" | "conflict" | "invalid";
+  /** Frontmatter is rewritten on import so Vibe accepts it. */
+  converted: boolean;
+  error: string | null;
+}
+
+export interface ImportableSkillSource {
+  id: string;
+  label: string;
+  root: string;
+  note: string | null;
+  skills: ImportableSkill[];
+}
+
+export interface ImportableSkills {
+  dest: string;
+  sources: ImportableSkillSource[];
+}
+
+export interface SkillImportResult {
+  imported: { id: string; name: string; path: string }[];
+  failed: { id: string; name: string | null; error: string }[];
 }
 
 export interface McpServerInfo {

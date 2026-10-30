@@ -1,7 +1,8 @@
 import * as React from "react";
-import { AlertTriangle, Bot, Loader2, Pencil, Terminal, X } from "lucide-react";
+import { AlertTriangle, Bot, Cloud, Folder, Loader2, Pencil, Terminal, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
+import { CloudDialog } from "./CloudDialog";
 import { EntryBlock } from "./MessageBlocks";
 import { useConversation } from "@/hooks/useConversation";
 import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession } from "@/lib/api";
@@ -17,6 +18,7 @@ export function Conversation({ session }: { session: Session }) {
   const [sending, setSending] = React.useState(false);
   const [sendError, setSendError] = React.useState<string | null>(null);
   const [handoff, setHandoff] = React.useState<string | null>(null);
+  const [cloudOpen, setCloudOpen] = React.useState(false);
   const [warnings, setWarnings] = React.useState<string[]>(session.warnings ?? []);
   const [model, setModel] = React.useState(session.model || "");
   const [agent, setAgent] = React.useState(session.agent || "");
@@ -121,6 +123,12 @@ export function Conversation({ session }: { session: Session }) {
     }
   };
 
+  const [reasoning, setReasoning] = React.useState<string | null>(session.reasoning ?? null);
+  React.useEffect(() => { setReasoning(session.reasoning ?? null); }, [session.reasoning]);
+  const changeReasoning = async (r: string | null) => {
+    try { const s = await patchSession(session.id, { reasoning: r }); setReasoning(s.reasoning ?? null); setSendError(null); }
+    catch (e) { setSendError(String(e)); }
+  };
   const changeModel = async (m: string) => {
     try { const s = await patchSession(session.id, { model: m }); setModel(s.model || ""); setSendError(null); }
     catch (e) { setSendError(`Could not change model: ${e}`); }
@@ -136,23 +144,37 @@ export function Conversation({ session }: { session: Session }) {
   return (
     <div className="flex h-full flex-col">
       {/* header */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b border-border shrink-0">
-        <div className="min-w-0 flex-1">
-          <SessionTitle session={session} />
-          <div className="text-xs text-text-faint font-mono truncate">{session.cwd}</div>
+      <div className="flex h-12 items-center gap-1 pl-5 pr-3 shrink-0">
+        <div className="min-w-0 flex-1 flex items-center gap-2 text-sm">
+          <span className="hidden min-w-0 shrink items-center gap-1.5 text-text-muted sm:flex" title={session.cwd}>
+            <Folder size={16} className="shrink-0" />
+            <span className="truncate">{session.cwd.split("/").filter(Boolean).pop() || session.cwd}</span>
+          </span>
+          <span className="hidden shrink-0 text-text-faint sm:inline">/</span>
+          <div className="min-w-0 flex-1"><SessionTitle session={session} /></div>
         </div>
+        <button
+          onClick={() => setCloudOpen(true)}
+          disabled={running}
+          title={running ? "Stop the turn to continue in the cloud" : "Continue this session on Vibe Code Web"}
+          aria-label="Continue in cloud"
+          className="shrink-0 grid h-8 w-8 place-items-center rounded-md text-text-muted hover:bg-surface-muted hover:text-text transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <Cloud size={16} />
+        </button>
+        <CloudDialog sessionId={session.id} open={cloudOpen} onClose={() => setCloudOpen(false)} />
         <button
           onClick={handoffToCli}
           disabled={running}
           title={running ? "Stop the turn to hand off to the CLI" : "Continue this session in the vibe CLI"}
           aria-label="Continue in the vibe CLI"
-          className="shrink-0 grid h-7 w-7 place-items-center rounded-md text-text-faint hover:bg-surface-muted hover:text-text transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
+          className="shrink-0 grid h-8 w-8 place-items-center rounded-md text-text-muted hover:bg-surface-muted hover:text-text transition-colors disabled:opacity-40 disabled:hover:bg-transparent"
         >
-          <Terminal size={14} />
+          <Terminal size={16} />
         </button>
         <span
           className={cn(
-            "h-2 w-2 rounded-full shrink-0",
+            "mx-2 h-2 w-2 rounded-full shrink-0",
             running ? "bg-primary animate-blink" : "bg-success",
           )}
           title={running ? "Running" : "Idle"}
@@ -161,7 +183,7 @@ export function Conversation({ session }: { session: Session }) {
 
       {/* messages — centered column, aligned with the composer */}
       <div ref={scrollRef} onScroll={event => { const el = event.currentTarget; pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }} className="flex-1 min-h-0 overflow-y-auto">
-        <div className="mx-auto max-w-3xl min-h-full flex flex-col pb-6">
+        <div className="mx-auto max-w-3xl min-h-full flex flex-col gap-1 pt-4 pb-6">
           {conv.historyBeforeCursor && <button onClick={() => void conv.loadEarlier()} className="mx-auto my-3 text-xs text-primary hover:underline">Load earlier messages</button>}
           {conv.loading && (
             <div className="my-auto flex items-center gap-2 px-6 py-8 text-text-muted text-sm">
@@ -177,9 +199,9 @@ export function Conversation({ session }: { session: Session }) {
             <EntryBlock key={e.id} e={e} onResolve={onResolve} expandReasoning={session.lane === "work"} />
           ))}
           {running && (
-            <div className="px-6 py-2 flex items-center gap-2 text-xs text-text-muted">
+            <div className="px-6 py-2 flex items-center gap-2 text-sm font-medium text-text-muted">
               <span className="vd-dots text-primary"><span /><span /><span /></span>
-              Vibe is working…
+              <span className="vd-shimmer">Vibe is working…</span>
             </div>
           )}
         </div>
@@ -241,7 +263,7 @@ export function Conversation({ session }: { session: Session }) {
       )}
 
       {/* composer */}
-      <div className="shrink-0 px-6 py-4">
+      <div className="shrink-0 px-6 pt-2 pb-4">
         <div className="mx-auto max-w-3xl">
           <Composer
             value={text}
@@ -253,8 +275,12 @@ export function Conversation({ session }: { session: Session }) {
             placeholder={`Message Vibe in ${session.cwd}…`}
             model={model}
             onModelChange={changeModel}
+            reasoning={reasoning}
+            onReasoningChange={changeReasoning}
             agent={agent}
             onAgentChange={changeAgent}
+            contextTokens={conv.stats?.contextTokens ?? null}
+            sessionTokens={conv.stats ? conv.stats.sessionPromptTokens + conv.stats.sessionCompletionTokens : null}
             footer={conv.stats ? (
               <div className="mt-2 flex items-center justify-end px-1 text-xs text-text-faint font-mono">
                 {formatTokens(conv.stats.sessionPromptTokens + conv.stats.sessionCompletionTokens)} tokens
@@ -325,7 +351,7 @@ function SessionTitle({ session }: { session: Session }) {
           if (e.key === "Enter") save();
           if (e.key === "Escape") { setTitle(session.title); setEditing(false); }
         }}
-        className="w-full bg-transparent text-sm font-medium text-text focus:outline-none border-b border-border focus:border-primary"
+        className="w-full bg-transparent text-sm text-text focus:outline-none border-b border-border focus:border-primary"
       />
     );
   }
@@ -333,10 +359,10 @@ function SessionTitle({ session }: { session: Session }) {
     <button
       onClick={() => setEditing(true)}
       title="Rename session"
-      className="group flex items-center gap-1.5 text-sm font-medium text-text truncate text-left max-w-full"
+      className="group flex h-7 items-center gap-1.5 rounded-md px-1.5 -ml-1.5 text-sm text-text truncate text-left max-w-full transition-colors hover:bg-surface-muted"
     >
       <span className="truncate">{session.title}</span>
-      <Pencil size={11} className="shrink-0 text-text-faint opacity-0 group-hover:opacity-100 transition-opacity" />
+      <Pencil size={14} className="shrink-0 text-text-faint opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
   );
 }

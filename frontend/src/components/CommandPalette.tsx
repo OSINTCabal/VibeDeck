@@ -306,7 +306,7 @@ export function CommandPalette({
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-start justify-center pt-[16vh] animate-fade-in"
       onMouseDown={(e) => { if (e.target === e.currentTarget) closePalette(); }}
     >
-      <div className="w-full max-w-xl mx-4 rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up">
+      <div className="vd-menu w-full max-w-xl mx-4 rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden">
         <div className="flex items-center gap-2 px-3 border-b border-border">
           <Search size={15} className="text-text-faint shrink-0" />
           <input

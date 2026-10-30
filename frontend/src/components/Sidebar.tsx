@@ -5,11 +5,18 @@ import {
   Network, Clock3, LayoutGrid, Folder,
 } from "lucide-react";
 import { getProjects } from "@/lib/api";
-import { cn } from "@/lib/utils";
+import { cn, modelLabel } from "@/lib/utils";
 import { LANES, type useSessions, type useHealth } from "@/hooks/useSessions";
 import type { Lane, Session } from "@/lib/types";
 import { AccountMenu } from "./AccountMenu";
 import { MistralLogo } from "./Logo";
+import { menuItem, menuPanel, usePresence } from "./ui";
+
+/** One sidebar row: 32px tall, 10px inset, 8px radius — the webapp's menu button. */
+const row = "flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors duration-150";
+const rowIdle = "text-text hover:bg-surface-muted";
+const rowActive = "bg-surface-muted text-text";
+const sectionLabel = "flex h-8 items-center px-2.5 text-xs font-medium text-text-faint";
 
 function startOfDay(ts: number): number {
   const d = new Date(ts * 1000);
@@ -59,6 +66,7 @@ export function Sidebar({
   const [projects, setProjects] = React.useState<{ path: string; name: string }[]>([]);
   const [projectsError, setProjectsError] = React.useState(false);
   const menuRef = React.useRef<HTMLDivElement>(null);
+  const menuPresence = usePresence(menuOpen);
   const menuButtonRef = React.useRef<HTMLButtonElement>(null);
 
   React.useEffect(() => {
@@ -94,7 +102,11 @@ export function Sidebar({
   const visible = query.trim()
     ? filtered.filter((s) => s.title.toLowerCase().includes(query.trim().toLowerCase()))
     : filtered;
-  const groups = React.useMemo(() => groupByDay(visible), [visible]);
+  // Sessions started in a listed project nest under it, like the webapp;
+  // the rest stay in the dated Sessions list.
+  const projectPaths = React.useMemo(() => new Set(projects.map(p => p.path)), [projects]);
+  const loose = React.useMemo(() => visible.filter(s => !projectPaths.has(s.cwd)), [visible, projectPaths]);
+  const groups = React.useMemo(() => groupByDay(loose), [loose]);
 
   const newSession = async () => {
     // cwd defaults to the user's home on the backend
@@ -105,17 +117,17 @@ export function Sidebar({
   const user = health?.user || "user";
 
   const iconBtn =
-    "h-7 w-7 grid place-items-center rounded-md text-text-faint hover:text-text hover:bg-surface-muted transition-colors";
+    "h-8 w-8 grid place-items-center rounded-md text-text-muted hover:text-text hover:bg-surface-muted transition-colors duration-150";
 
   return (
     <aside
       className={cn(
-        "shrink-0 h-full bg-sidebar overflow-hidden transition-[width] duration-200",
-        collapsed ? "w-0" : "w-64 border-r border-sidebar-border",
+        "shrink-0 h-full bg-sidebar overflow-hidden transition-[width] duration-200 ease-in-out",
+        collapsed ? "w-0" : "w-[260px] border-r border-sidebar-border",
       )}
     >
-      <div className="w-64 h-full flex flex-col">
-        <div className="px-3 pt-3 pb-2 shrink-0 flex items-center gap-1.5">
+      <div className="w-[260px] h-full flex flex-col">
+        <div className="px-3.5 pt-2.5 pb-2 shrink-0 flex items-center gap-1">
           <div ref={menuRef} className="relative" onBlur={(event) => {
             if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setMenuOpen(false);
           }}>
@@ -126,15 +138,17 @@ export function Sidebar({
               aria-expanded={menuOpen}
               aria-controls="vibe-navigation"
               onClick={() => setMenuOpen(open => !open)}
-              className={cn("flex h-8 items-center gap-1.5 rounded-md px-1 text-text transition-colors hover:bg-surface-muted focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary", menuOpen && "bg-surface-muted")}
+              className={cn("flex h-8 items-center gap-2 rounded-md pl-1 pr-1.5 text-text transition-colors hover:bg-surface-muted active:bg-surface-muted/70", menuOpen && "bg-surface-muted")}
             >
-              <MistralLogo size={20} className="shrink-0" />
-              <span className="text-[15px] font-semibold leading-none">Vibe</span>
-              <ChevronDown size={12} className={cn("text-text-faint transition-transform duration-150 motion-reduce:transition-none", menuOpen && "rotate-180")} />
+              <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary">
+                <MistralLogo size={15} className="fill-white" />
+              </span>
+              <span className="text-base font-semibold leading-none">Vibe</span>
+              <ChevronDown size={16} className={cn("text-text-muted transition-transform duration-150 motion-reduce:transition-none", menuOpen && "rotate-180")} />
             </button>
-            {menuOpen && <nav id="vibe-navigation" aria-label="Vibe navigation" className="absolute left-0 top-full z-50 mt-1 w-[232px] max-h-[calc(100vh-8rem)] overflow-y-auto rounded-lg border border-border bg-surface-raised p-1.5 shadow-xl animate-slide-up">
-              <a onClick={() => setMenuOpen(false)} href="https://console.mistral.ai/" target="_blank" rel="noreferrer" className="flex items-center gap-3 rounded-md px-2.5 py-2 text-sm text-text hover:bg-surface-muted transition-colors"><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded bg-primary"><MistralLogo size={18} className="fill-white" /></span>Studio</a>
-              {[{to:"/workspace/docs",label:"Docs & API"},{to:"/workspace/admin",label:"Admin"}].map(item => <NavLink key={item.to} to={item.to} className="flex items-center gap-3 rounded-md px-2.5 py-2 text-sm text-text hover:bg-surface-muted transition-colors"><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded bg-text-faint"><MistralLogo size={18} className="fill-white" /></span>{item.label}</NavLink>)}
+            {menuPresence.mounted && <nav id="vibe-navigation" aria-label="Vibe navigation" data-state={menuPresence.state} className={cn(menuPanel, "absolute left-0 top-full z-50 mt-1 flex w-[232px] max-h-[calc(100vh-8rem)] flex-col gap-1 overflow-y-auto")}>
+              <a onClick={() => setMenuOpen(false)} href="https://console.mistral.ai/" target="_blank" rel="noreferrer" className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary"><MistralLogo size={15} className="fill-white" /></span>Studio</a>
+              {[{to:"/workspace/docs",label:"Docs & API"},{to:"/workspace/admin",label:"Admin"}].map(item => <NavLink key={item.to} to={item.to} className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-text-faint"><MistralLogo size={15} className="fill-white" /></span>{item.label}</NavLink>)}
             </nav>}
           </div>
           <div className="flex-1" />
@@ -142,9 +156,10 @@ export function Sidebar({
             onClick={() => { setSearchOpen((o) => !o); if (searchOpen) setQuery(""); }}
             title="Search sessions"
             aria-label="Search sessions"
-            className={iconBtn}
+            aria-pressed={searchOpen}
+            className={cn(iconBtn, searchOpen && "bg-surface-muted text-text")}
           >
-            <Search size={15} />
+            <Search size={16} />
           </button>
           <button
             onClick={onToggleCollapse}
@@ -152,25 +167,25 @@ export function Sidebar({
             aria-label="Hide sidebar"
             className={iconBtn}
           >
-            <PanelLeft size={15} />
+            <PanelLeft size={16} />
           </button>
         </div>
 
         {/* search — filters the session list */}
         {searchOpen && (
-          <div className="px-3 pb-2 shrink-0">
-            <div className="flex items-center gap-2 rounded-md bg-surface-muted px-2">
-              <Search size={13} className="text-text-faint shrink-0" />
+          <div className="px-3.5 pb-2 shrink-0 animate-fade-in">
+            <div className="flex h-8 items-center gap-2 rounded-md border border-border bg-surface px-2.5 transition-colors focus-within:border-border-strong">
+              <Search size={14} className="text-text-faint shrink-0" />
               <input
                 autoFocus
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search sessions…"
-                className="w-full bg-transparent py-1.5 text-sm text-text placeholder:text-text-faint focus:outline-none"
+                className="w-full bg-transparent text-sm text-text placeholder:text-text-faint focus:outline-none"
               />
               {query && (
                 <button onClick={() => setQuery("")} aria-label="Clear search" className="text-text-faint transition-colors hover:text-text">
-                  <X size={12} />
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -178,7 +193,7 @@ export function Sidebar({
         )}
 
         {/* lane tabs — segmented Work | Code, like the webapp */}
-        <div className="mx-3 mb-2 shrink-0 grid grid-cols-2 gap-1 rounded-lg bg-sidebar-accent p-0.5">
+        <div className="mx-3.5 mb-2 shrink-0 grid h-9 grid-cols-2 gap-1 rounded-md bg-sidebar-accent p-0.5">
           {LANES.map((l) => (
             <button
               key={l.key}
@@ -187,10 +202,10 @@ export function Sidebar({
               onClick={() => setLane(l.key)}
               title={l.hint}
               className={cn(
-                "rounded-md py-1.5 text-sm font-medium transition-colors",
+                "rounded-sm text-base font-medium transition-colors duration-150",
                 lane === l.key
-                  ? "bg-sidebar text-text shadow-sm ring-1 ring-border/60"
-                  : "text-text-muted hover:text-text hover:bg-surface-muted/50",
+                  ? "bg-sidebar text-text shadow-[inset_0_1px_0_rgb(255_255_255/0.06),inset_0_-1px_0_rgb(0_0_0/0.5)]"
+                  : "text-text-muted hover:text-text",
               )}
             >
               {l.label}
@@ -198,38 +213,34 @@ export function Sidebar({
           ))}
         </div>
 
-        {/* new chat / new session */}
-        <div className="px-3 mb-2 shrink-0">
+        {/* Navigation, projects and history share one scroll area on shorter windows. */}
+        <div className="flex-1 min-h-0 overflow-y-auto px-3.5 pb-2">
           <button
             onClick={newSession}
-            className="w-full flex items-center gap-2 rounded-md bg-surface-muted hover:bg-surface-muted/60 px-2.5 py-2 text-sm text-text transition-colors"
+            className={cn(row, location.pathname === "/" && !location.search ? rowActive : rowIdle)}
           >
-            <Plus size={15} className="text-text-muted" />
-            New {lane === "code" ? "Session" : "Chat"}
+            <Plus size={16} className="shrink-0" />
+            New {lane === "code" ? "session" : "chat"}
           </button>
-        </div>
-
-        {/* Context, projects and history share one scroll area on shorter windows. */}
-        <div className="flex-1 min-h-0 overflow-y-auto px-2">
           <button type="button" aria-expanded={contextOpen} aria-controls="sidebar-context" onClick={() => {
             setContextOpen(!contextOpen);
             localStorage.setItem("vibedeck.context-open", String(!contextOpen));
-          }} className="w-full flex items-center gap-2.5 rounded-md px-3 py-2 text-sm text-text hover:bg-surface-muted transition-colors">
-            <Network size={15} />Context
-            <ChevronDown size={13} className={cn("ml-auto text-text-faint transition-transform duration-200 motion-reduce:transition-none", !contextOpen && "-rotate-90")} />
+          }} className={cn(row, rowIdle, "group")}>
+            <Network size={16} className="shrink-0" />Context
+            <ChevronDown size={16} className={cn("vd-disclosure-chevron ml-auto text-text-muted motion-reduce:transition-none", !contextOpen && "-rotate-90")} />
           </button>
           <div className="context-disclosure" data-open={contextOpen} aria-hidden={!contextOpen} ref={node => node?.toggleAttribute("inert", !contextOpen)}>
           <div className="min-h-0 overflow-hidden">
-          <nav id="sidebar-context" aria-label="Context" className="ml-5 border-l border-border pl-2">
+          <nav id="sidebar-context" aria-label="Context">
             {lane === "work" ? <>
-              <WorkspaceItem section="skills" label="Skills" />
-              <WorkspaceItem section="knowledge" label="Knowledge" />
-              <WorkspaceItem section="connectors" label="Connectors" />
-              <WorkspaceItem section="libraries" label="Libraries" />
-              <WorkspaceItem section="instructions" label="Instructions" />
+              <WorkspaceItem section="skills" label="Skills" nested />
+              <WorkspaceItem section="knowledge" label="Knowledge" nested />
+              <WorkspaceItem section="connectors" label="Connectors" nested />
+              <WorkspaceItem section="libraries" label="Libraries" nested />
+              <WorkspaceItem section="instructions" label="Instructions" nested />
             </> : <>
-              <NavItem to="/skills" label="Skills" />
-              <NavItem to="/connectors" label="Connectors" />
+              <NavItem to="/skills" label="Skills" nested />
+              <NavItem to="/connectors" label="Connectors" nested />
             </>}
           </nav>
           </div>
@@ -237,22 +248,28 @@ export function Sidebar({
           {lane === "work"
             ? <WorkspaceItem section="scheduled" icon={Clock3} label="Scheduled" />
             : <NavItem to="/extensions" icon={LayoutGrid} label="Extensions" />}
-          {lane === "work" && <p className="px-3 pt-1 text-[11px] text-text-faint">Shared with your Mistral web workspace.</p>}
-          <div className="px-3 pt-6 pb-2 text-xs text-text-muted">Projects</div>
-          {projects.map(project => <NavLink key={project.path} to={`/?project=${encodeURIComponent(project.path)}`} className="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm text-text hover:bg-surface-muted transition-colors" title={project.path}>
-            <Folder size={15} className="shrink-0" /><span className="truncate">{project.name}</span>
-          </NavLink>)}
-          {projectsError && <p className="px-3 text-xs text-text-faint">Projects could not be loaded.</p>}
-          {!projects.length && !projectsError && <p className="px-3 text-xs text-text-faint">Choose a folder to start a project.</p>}
-          <div className="px-3 pt-6 pb-1 text-xs text-text-muted">Sessions</div>
+          {lane === "work" && <p className="px-2.5 pt-1 text-xs text-text-faint">Shared with your Mistral web workspace.</p>}
+          <div className={cn(sectionLabel, "mt-4")}>Projects</div>
+          {projects.map(project => {
+            const nested = visible.filter(s => s.cwd === project.path);
+            return <div key={project.path}>
+              <NavLink to={`/?project=${encodeURIComponent(project.path)}`} className={({ isActive }) => cn(row, isActive && location.search.includes(encodeURIComponent(project.path)) ? rowActive : rowIdle)} title={project.path}>
+                <Folder size={16} className="shrink-0" /><span className="truncate">{project.name}</span>
+              </NavLink>
+              {nested.map(s => <SessionItem key={s.id} s={s} remove={remove} nested />)}
+            </div>;
+          })}
+          {projectsError && <p className="px-2.5 text-xs text-text-faint">Projects could not be loaded.</p>}
+          {!projects.length && !projectsError && <p className="px-2.5 text-xs text-text-faint">Choose a folder to start a project.</p>}
+          <div className={cn(sectionLabel, "mt-4")}>Sessions</div>
           {groups.length === 0 && (
-            <div className="px-2 py-3 text-xs text-text-faint">
-              {query.trim() ? "No sessions match." : "No sessions yet. Start a new one."}
+            <div className="px-2.5 py-1 text-xs text-text-faint">
+              {query.trim() ? "No sessions match." : visible.length ? "All sessions are listed under their projects." : "No sessions yet. Start a new one."}
             </div>
           )}
           {groups.map((g) => (
             <div key={g.label} className="mb-1">
-              <div className="px-2 pt-2 pb-1 text-xs text-text-faint">
+              <div className="px-2.5 pt-2 pb-1 text-xs text-text-faint">
                 {g.label}
               </div>
               {g.items.map((s) => (
@@ -263,14 +280,14 @@ export function Sidebar({
         </div>
 
         {/* user profile + status — pinned footer, never cut off */}
-        <div className="px-3 py-2 border-t border-sidebar-border shrink-0">
+        <div className="px-3.5 pt-1 pb-2.5 shrink-0">
           <AccountMenu user={user} />
-          <div className="mt-1 px-1 flex items-center gap-2 text-[11px] text-text-faint">
+          <div className="mt-1 px-3 flex items-center gap-2 text-[11px] text-text-faint">
             <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", health?.ok ? "bg-success" : "bg-danger")} />
             <span className="truncate">{health?.ok ? "Sidecar connected" : "Sidecar offline"}</span>
             {health && (
-              <span className="ml-auto shrink-0 font-mono truncate max-w-[110px]" title={health.default_model}>
-                {health.default_model}
+              <span className="ml-auto shrink-0 truncate max-w-[110px]" title={health.default_model}>
+                {modelLabel(health.default_model)}
               </span>
             )}
           </div>
@@ -280,11 +297,22 @@ export function Sidebar({
   );
 }
 
+/** The 1px tree guide beside nested rows; the active row lights a short orange segment. */
+function TreeLine({ active }: { active: boolean }) {
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute -top-px -bottom-px left-4 flex w-px items-center">
+      <span className="absolute inset-y-0 w-full bg-border" />
+      {active && <span className="relative h-3/5 w-full bg-primary" />}
+    </span>
+  );
+}
+
 function SessionItem({
-  s, remove,
+  s, remove, nested = false,
 }: {
   s: Session;
   remove: ReturnType<typeof useSessions>["remove"];
+  nested?: boolean;
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -293,21 +321,18 @@ function SessionItem({
     <NavLink
       to={`/sessions/${s.id}`}
       className={({ isActive }) => cn(
-        "group flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
-        isActive
-          ? "bg-surface-muted text-text"
-          : "text-text-muted hover:bg-surface-muted/50 hover:text-text",
+        row, "group relative pr-1.5",
+        nested && "pl-[38px]",
+        isActive ? rowActive : "text-text-muted hover:bg-surface-muted hover:text-text",
       )}
     >
-      <span className={cn(
-        "h-1.5 w-1.5 rounded-full shrink-0",
-        s.status === "running" ? "bg-primary animate-blink" : "bg-text-faint",
-      )} />
+      {nested && <TreeLine active={active} />}
+      {s.status === "running" && <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-primary animate-blink" aria-label="Running" />}
       <span className="truncate flex-1">{s.title}</span>
       {s.origin === "vibe" && (
         <span
           title="Session from the vibe CLI — continue it here or in the terminal"
-          className="shrink-0 rounded border border-border px-1 py-px text-[9px] font-medium uppercase tracking-wider text-text-faint"
+          className="shrink-0 rounded-sm border border-border px-1 py-px text-[9px] font-medium uppercase tracking-wider text-text-faint"
         >
           CLI
         </span>
@@ -323,35 +348,36 @@ function SessionItem({
         title="Delete session"
         aria-label={`Delete session ${s.title}`}
         className={cn(
-          "shrink-0 rounded p-0.5 text-text-faint hover:text-danger transition-colors",
-          active ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+          "shrink-0 grid h-6 w-6 place-items-center rounded-sm text-text-faint hover:bg-surface-muted hover:text-danger transition-colors",
+          active ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
         )}
       >
-        <Trash2 size={12} />
+        <Trash2 size={14} />
       </button>
     </NavLink>
   );
 }
 
-function NavItem({ to, icon: Icon, label }: { to: string; icon?: React.ElementType; label: string }) {
+function NavItem({ to, icon: Icon, label, nested = false }: { to: string; icon?: React.ElementType; label: string; nested?: boolean }) {
   return (
     <NavLink
       to={to}
-      className={({ isActive }) => cn(
-        "flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors",
-        isActive
-          ? "bg-surface-muted text-text"
-          : "text-text-muted hover:text-text hover:bg-surface-muted/50",
-      )}
+      className={({ isActive }) => cn(row, "relative", nested && "pl-[38px]", isActive ? rowActive : nested ? "text-text-muted hover:bg-surface-muted hover:text-text" : rowIdle)}
     >
-      {Icon && <Icon size={15} />}
-      {label}
+      {({ isActive }) => <>
+        {nested && <TreeLine active={isActive} />}
+        {Icon && <Icon size={16} className="shrink-0" />}
+        {label}
+      </>}
     </NavLink>
   );
 }
 
-function WorkspaceItem({ section, label, icon: Icon }: { section: string; label: string; icon?: React.ElementType }) {
-  return <NavLink to={"/workspace/" + section} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-sm text-text-muted hover:text-text hover:bg-surface-muted/50 transition-colors">
-    {Icon && <Icon size={15} />}{label}
+function WorkspaceItem({ section, label, icon: Icon, nested = false }: { section: string; label: string; icon?: React.ElementType; nested?: boolean }) {
+  return <NavLink to={"/workspace/" + section} className={({ isActive }) => cn(row, "relative", nested && "pl-[38px]", isActive ? rowActive : nested ? "text-text-muted hover:bg-surface-muted hover:text-text" : rowIdle)}>
+    {({ isActive }) => <>
+      {nested && <TreeLine active={isActive} />}
+      {Icon && <Icon size={16} className="shrink-0" />}{label}
+    </>}
   </NavLink>;
 }

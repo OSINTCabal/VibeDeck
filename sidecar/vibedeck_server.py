@@ -34,8 +34,11 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
+import cloud_teleport
+import git_projects
 import httpx
 import providers as provider_config
+import skill_import
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
 from agent_routing import write_settings as write_agent_settings
@@ -919,6 +922,9 @@ async def _fetch_vibe_models() -> list[dict]:
                         "name": m.get("displayName") or alias,
                         "supportsImages": bool(m.get("supportsImages")),
                         "thinkingLevels": m.get("thinkingLevels") or [],
+                        "thinking": m.get("thinking"),
+                        "maxContextLength": m.get("maxContextLength"),
+                        "autoCompactThreshold": m.get("autoCompactThreshold"),
                     })
         finally:
             await bridge.close()
@@ -1491,6 +1497,59 @@ async def get_skills(sid: Optional[str] = Query(None)) -> dict:
     return out
 
 
+class SkillImportItem(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    overwrite: StrictBool = False
+
+
+class SkillImportRequest(BaseModel):
+    items: list[SkillImportItem] = Field(min_length=1, max_length=500)
+    projects: list[str] = Field(default_factory=list, max_length=100)
+    paths: list[str] = Field(default_factory=list, max_length=20)
+
+
+@app.get("/api/skills/importable")
+async def get_importable_skills(project: list[str] = Query([]), path: list[str] = Query([])) -> dict:
+    """Skills installed for other agents (Claude Code, Codex, project folders, chosen paths)."""
+    try:
+        sources = await asyncio.to_thread(skill_import.scan, project, path)
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    return skill_import.serialize(sources)
+
+
+@app.post("/api/skills/import/upload")
+async def upload_skill(request: Request, filename: str = Query("SKILL.md", max_length=255)) -> dict:
+    """Unpack an uploaded SKILL.md or zip into a staging folder and list what it holds."""
+    if int(request.headers.get("content-length") or 0) > skill_import.MAX_BYTES:
+        raise HTTPException(413, "File is larger than 25 MB")
+    data = await request.body()
+    if not data:
+        raise HTTPException(400, "The file is empty")
+    try:
+        staged = await asyncio.to_thread(skill_import.stage_upload, data, filename, DATA_DIR / "skill-uploads")
+        sources = await asyncio.to_thread(skill_import.scan, [], [str(staged)])
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    out = skill_import.serialize([source for source in sources if source.root == staged])
+    out["path"] = str(staged)
+    return out
+
+
+@app.post("/api/skills/import")
+async def import_skills(body: SkillImportRequest) -> dict:
+    """Copy the chosen skills into $VIBE_HOME/skills; existing ones only with overwrite."""
+    try:
+        result = await asyncio.to_thread(skill_import.import_selected,
+                                         [(item.id, item.overwrite) for item in body.items],
+                                         body.projects, body.paths)
+    except skill_import.SkillImportError as e:
+        raise HTTPException(400, str(e)) from None
+    if result["imported"]:
+        store.audit("skills.import", ", ".join(item["name"] for item in result["imported"]))
+    return result
+
+
 @app.get("/api/workspace/{kind}")
 async def get_workspace(kind: Literal["connectors", "libraries"]) -> dict:
     from workspace import read_workspace
@@ -1627,11 +1686,76 @@ async def get_projects() -> dict:
         p = home / d
         if p.is_dir() and str(p) not in seen:
             known.append({"path": str(p), "name": p.name})
+    for r in recent:
+        r["branch"] = git_projects.head_branch(Path(r["path"]))
     return {
         "home": str(home),
         "recent": recent[:10],
         "known": known,
+        "repos": await _discover_repos(home, [r["path"] for r in recent]),
     }
+
+
+# Git repositories under home and next to recent projects. The walk is
+# time-boxed and cached briefly; branches are re-read on every request.
+_repo_cache: tuple[float, tuple, list[dict]] | None = None
+
+
+def _vibe_trusted_folders() -> list[str]:
+    """Folders the Vibe CLI was trusted in — where the user actually codes."""
+    try:
+        path = provider_config.vibe_config_path().parent / "trusted_folders.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [p for p in data.get("trusted", []) if isinstance(p, str)]
+
+
+async def _discover_repos(home: Path, recent: list[str]) -> list[dict]:
+    global _repo_cache
+    roots: list[tuple[Path, int]] = [(home, 3)]
+    for path in [*recent, *_vibe_trusted_folders()]:
+        # siblings and cousins of places the user worked in (e.g. /mnt/disk/Projects/*)
+        for ancestor in list(Path(path).parents)[:2]:
+            if ancestor != home and home not in ancestor.parents and len(ancestor.parts) > 2 and ancestor.is_dir():
+                roots.append((ancestor, 2))
+    key = tuple(str(r) for r, _ in roots)
+    if _repo_cache and _repo_cache[1] == key and time.monotonic() - _repo_cache[0] < 120:
+        repos = _repo_cache[2]
+    else:
+        repos = await asyncio.to_thread(git_projects.find_repos, roots)
+        _repo_cache = (time.monotonic(), key, repos)
+    return [{**r, "branch": git_projects.head_branch(Path(r["path"])) or r["branch"]} for r in repos]
+
+
+class GitSwitchReq(BaseModel):
+    path: str
+    branch: str
+    create: StrictBool = False
+
+
+@app.get("/api/git/branches")
+async def git_branches(path: str = Query(..., min_length=1)) -> dict:
+    target = Path(path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    info = await asyncio.to_thread(git_projects.branches, target)
+    if info is None:
+        raise HTTPException(404, "not a git repository")
+    return info
+
+
+@app.post("/api/git/switch")
+async def git_switch(r: GitSwitchReq) -> dict:
+    target = Path(r.path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    try:
+        return await asyncio.to_thread(git_projects.switch, target, r.branch, r.create)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
 
 
 # ---- direct API chat (Chat lane)
@@ -1715,6 +1839,126 @@ async def studio_account(sid: Optional[str] = Query(None)) -> dict:
         except BridgeError as e:
             out["error"] = e.message
     return out
+
+
+# ---- Vibe Code Web: continue a session in the cloud (teleport)
+
+_teleports = cloud_teleport.TeleportRegistry()
+
+
+class CloudOpenReq(BaseModel):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPickerReq(BaseModel):
+    picker_id: str = Field(..., alias="pickerId", min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CloudSelectReq(CloudPickerReq):
+    project_id: str = Field(..., alias="projectId", min_length=1, max_length=200)
+
+
+class CloudCreateReq(CloudPickerReq):
+    name: str = Field(..., min_length=1, max_length=200)
+    default_branch: str = Field(..., alias="defaultBranch", min_length=1, max_length=200)
+
+
+class CloudTeleportReq(CloudSelectReq):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPushReq(BaseModel):
+    approved: StrictBool
+
+
+async def _cloud_call(sid: str, method: str, params: dict, timeout: float = 90.0) -> tuple[Any, str, Any]:
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        return bridge, esid, await bridge.call(method, {"sessionId": esid, **params}, timeout=timeout)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+
+
+@app.post("/api/sessions/{sid}/cloud/open")
+async def cloud_open(sid: str, r: CloudOpenReq) -> dict:
+    """Open the Vibe Code project picker for this session's git repository."""
+    params: dict[str, Any] = {"purpose": "teleport"}
+    if r.prompt:
+        params["prompt"] = r.prompt
+    return (await _cloud_call(sid, "vibeCode/projects/open", params))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/more")
+async def cloud_more(sid: str, r: CloudPickerReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/loadMore", {"pickerId": r.picker_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/select")
+async def cloud_select(sid: str, r: CloudSelectReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": r.project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/create")
+async def cloud_create(sid: str, r: CloudCreateReq) -> dict:
+    """Create a Vibe Code project for the repository and select it."""
+    _, _, created = await _cloud_call(sid, "vibeCode/projects/create", {
+        "pickerId": r.picker_id, "name": r.name, "defaultBranch": r.default_branch})
+    project_id = ((created or {}).get("project") or {}).get("projectId")
+    if not project_id:
+        return created
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/cancel")
+async def cloud_cancel(sid: str, r: CloudPickerReq) -> dict:
+    await _cloud_call(sid, "vibeCode/projects/cancel", {"pickerId": r.picker_id})
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport")
+async def cloud_teleport_start(sid: str, r: CloudTeleportReq) -> dict:
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        op = await _teleports.start(bridge, sid, esid, r.picker_id, r.project_id, r.prompt)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    store.audit("cloud.teleport", f"{sid} -> {r.project_id}")
+    return op.view()
+
+
+def _teleport_op(sid: str, op_id: str) -> cloud_teleport.TeleportOperation:
+    op = _teleports.get(sid, op_id)
+    if op is None:
+        raise HTTPException(404, "teleport operation not found")
+    return op
+
+
+@app.get("/api/sessions/{sid}/cloud/teleport/{op_id}")
+async def cloud_teleport_status(sid: str, op_id: str) -> dict:
+    return _teleport_op(sid, op_id).view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/push")
+async def cloud_teleport_push(sid: str, op_id: str, r: CloudPushReq) -> dict:
+    op = _teleport_op(sid, op_id)
+    if op.push is None:
+        raise HTTPException(409, "Teleport is not waiting for push approval")
+    await _cloud_call(sid, "vibeCode/teleport/push/respond", {"operationId": op.id, "approved": r.approved})
+    return op.view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/cancel")
+async def cloud_teleport_cancel(sid: str, op_id: str) -> dict:
+    op = _teleport_op(sid, op_id)
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        await _teleports.cancel(bridge, esid, op)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    return op.view()
 
 
 @app.get("/api/studio/costs")
