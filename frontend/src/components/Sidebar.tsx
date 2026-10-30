@@ -2,13 +2,14 @@ import * as React from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Plus, Search, PanelLeft, Trash2, ChevronDown, X,
-  Network, Clock3, LayoutGrid, MoreHorizontal, Pencil,
+  Network, Clock3, LayoutGrid, MoreHorizontal, Pencil, Cloud, CloudOff, RotateCw, ExternalLink,
 } from "lucide-react";
 import { getProjects, patchSession } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
 import { cn, modelLabel } from "@/lib/utils";
 import { LANES, type useSessions, type useHealth } from "@/hooks/useSessions";
-import type { Lane, Session } from "@/lib/types";
+import type { CloudSession, Lane, Session } from "@/lib/types";
+import { refreshCloud, signInToCloud, useCloud, type CloudState } from "@/lib/cloud";
 import { AccountMenu } from "./AccountMenu";
 import { MistralLogo } from "./Logo";
 import { menuItem, menuPanel, usePresence } from "./ui";
@@ -108,9 +109,13 @@ export function Sidebar({
   }, [menuOpen]);
 
   const filtered = sessions.filter((s) => s.lane === lane);
-  const visible = query.trim()
-    ? filtered.filter((s) => s.title.toLowerCase().includes(query.trim().toLowerCase()))
-    : filtered;
+  const matches = (title: string) => title.toLowerCase().includes(query.trim().toLowerCase());
+  const visible = query.trim() ? filtered.filter((s) => matches(s.title)) : filtered;
+  // Vibe Code Web sessions belong to the Code lane. They nest under the local
+  // project that shares their repository, or under their own cloud project.
+  const cloud = useCloud();
+  const cloudSessions = lane === "code" ? cloud.sessions.filter(s => !query.trim() || matches(s.title)) : [];
+  const cloudPath = React.useMemo(() => new Map(cloud.projects.map(p => [p.id, p.localPath])), [cloud.projects]);
   // Sessions started in a listed project nest under it, like the webapp;
   // the rest stay in the dated Sessions list.
   const projectPaths = React.useMemo(() => new Set(projects.map(p => p.path)), [projects]);
@@ -261,14 +266,16 @@ export function Sidebar({
           <div className={cn(sectionLabel, "mt-4")}>Projects</div>
           {projects.map(project => {
             const nested = visible.filter(s => s.cwd === project.path);
+            const remote = cloudSessions.filter(s => cloudPath.get(s.projectId) === project.path);
+            const count = nested.length + remote.length;
             const folded = collapsedProjects.includes(project.path) && !query.trim();
             return <div key={project.path}>
               <div className="group relative">
                 <NavLink to={`/?project=${encodeURIComponent(project.path)}`} className={({ isActive }) => cn(row, "pr-9", isActive && location.search.includes(encodeURIComponent(project.path)) ? rowActive : rowIdle)} title={project.path}>
                   <ProjectMark name={project.name} /><span className="truncate flex-1">{project.name}</span>
-                  {nested.length > 0 && <span className="shrink-0 text-xs text-text-faint tabular-nums group-hover:opacity-0">{nested.length}</span>}
+                  {count > 0 && <span className="shrink-0 text-xs text-text-faint tabular-nums group-hover:opacity-0">{count}</span>}
                 </NavLink>
-                {nested.length > 0 && <button
+                {count > 0 && <button
                   type="button"
                   onClick={() => toggleProject(project.path)}
                   aria-expanded={!folded}
@@ -282,10 +289,34 @@ export function Sidebar({
               <div className="vd-collapse" data-open={!folded}>
                 <div aria-hidden={folded} ref={node => node?.toggleAttribute("inert", folded)}>
                   {nested.map(s => <SessionItem key={s.id} s={s} remove={remove} nested />)}
+                  {remote.map(s => <CloudSessionItem key={s.id} s={s} />)}
                 </div>
               </div>
             </div>;
           })}
+          {lane === "code" && cloud.projects
+            .filter(p => !p.localPath || !projectPaths.has(p.localPath))
+            .map(project => {
+              const nested = cloudSessions.filter(s => s.projectId === project.id);
+              if (query.trim() && !nested.length) return null;
+              const key = "cloud:" + project.id;
+              const folded = collapsedProjects.includes(key) && !query.trim();
+              return <div key={key}>
+                <button type="button" onClick={() => toggleProject(key)} aria-expanded={!folded}
+                  title={`${project.name} on Vibe Code Web`} className={cn(row, rowIdle, "group")}>
+                  <ProjectMark name={project.name} /><span className="truncate flex-1 text-left">{project.name}</span>
+                  <Cloud size={14} aria-label="Vibe Code Web project" className="shrink-0 text-text-faint" />
+                  <ChevronDown size={16} className={cn("vd-disclosure-chevron shrink-0 text-text-muted motion-reduce:transition-none", folded && "-rotate-90")} />
+                </button>
+                <div className="vd-collapse" data-open={!folded}>
+                  <div aria-hidden={folded} ref={node => node?.toggleAttribute("inert", folded)}>
+                    {nested.map(s => <CloudSessionItem key={s.id} s={s} />)}
+                    {!nested.length && <p className="py-1 pl-[38px] pr-2.5 text-xs text-text-faint">No sessions yet.</p>}
+                  </div>
+                </div>
+              </div>;
+            })}
+          {lane === "code" && <CloudStatusNote cloud={cloud} />}
           {projectsError && <p className="px-2.5 text-xs text-text-faint">Projects could not be loaded.</p>}
           {!projects.length && !projectsError && <p className="px-2.5 text-xs text-text-faint">Choose a folder to start a project.</p>}
           <div className={cn(sectionLabel, "mt-4")}>Sessions</div>
@@ -421,6 +452,46 @@ function SessionItem({
         />
       </span>
     </NavLink>
+  );
+}
+
+/** A Vibe Code Web session, nested under its project; opens read-only. */
+function CloudSessionItem({ s }: { s: CloudSession }) {
+  const location = useLocation();
+  const to = `/cloud/${encodeURIComponent(s.projectId)}/${encodeURIComponent(s.id)}`;
+  const active = location.pathname === to;
+  return (
+    <NavLink to={to} title={s.title} className={cn(row, "group relative pl-[38px]",
+      active ? rowActive : "text-text-muted hover:bg-surface-muted hover:text-text")}>
+      <TreeLine active={active} />
+      {s.status === "running" && <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-primary animate-blink" aria-label="Running" />}
+      <span className="truncate flex-1">{s.title}</span>
+      <Cloud size={14} aria-label="Vibe Code Web session" className="shrink-0 text-text-faint" />
+    </NavLink>
+  );
+}
+
+/** One quiet line when cloud sessions are missing for a reason the user can fix. */
+function CloudStatusNote({ cloud }: { cloud: CloudState }) {
+  const [busy, setBusy] = React.useState(false);
+  if (cloud.status === "unsupported" || cloud.status === "ready" || cloud.status === "loading") return null;
+  const signIn = cloud.status === "signed_out";
+  const act = async () => {
+    setBusy(true);
+    try { await (signIn ? signInToCloud() : refreshCloud()); } catch { /* The note keeps the last status. */ } finally { setBusy(false); }
+  };
+  const Icon = cloud.status === "offline" ? CloudOff : Cloud;
+  const label = signIn ? "Sign in" : cloud.status === "blocked" ? "Open" : "Retry";
+  return (
+    <div className="mt-1 flex items-start gap-2 px-2.5 py-1 text-xs text-text-faint">
+      <Icon size={14} className="mt-px shrink-0" />
+      <span className="min-w-0 flex-1">{signIn ? "Sign in to Mistral to list your Vibe Code Web sessions." : cloud.message}</span>
+      {cloud.status === "blocked"
+        ? <a href="https://chat.mistral.ai/code" target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 font-medium text-text-muted hover:text-text">{label}<ExternalLink size={12} /></a>
+        : <button type="button" disabled={busy} onClick={() => void act()} className="flex shrink-0 items-center gap-1 font-medium text-text-muted transition-colors hover:text-text disabled:opacity-50">
+          {!signIn && <RotateCw size={12} className={cn(busy && "animate-spin")} />}{label}
+        </button>}
+    </div>
   );
 }
 

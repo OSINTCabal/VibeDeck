@@ -30,6 +30,27 @@ function cookieDetails(cookie, section = 'work') {
   if (cookie.expires > 0) detail.expirationDate = cookie.expires;
   return detail;
 }
+// Read-only Vibe Code Web queries the desktop may run with the web sign-in.
+const CODE_READS = Object.freeze({
+  'projects.list': () => ({ direction: 'forward' }),
+  'sessions.list': params => ({ projectId: codeId(params.projectId), includePinned: true, direction: 'forward' }),
+  'sessions.messages': params => ({ sessionId: codeId(params.sessionId), direction: 'forward' }),
+});
+function codeId(value) {
+  if (typeof value !== 'string' || !/^[\w-]{1,100}$/.test(value)) throw new Error('Invalid Vibe Code id');
+  return value;
+}
+function codeReadPath(procedure, params) {
+  if (!Object.hasOwn(CODE_READS, procedure)) throw new Error('Unknown Vibe Code read');
+  params = params && typeof params === 'object' ? params : {};
+  const input = CODE_READS[procedure](params);
+  if (params.cursor != null) {
+    if (typeof params.cursor !== 'string' || !params.cursor || params.cursor.length > 512) throw new Error('Invalid Vibe Code cursor');
+    input.cursor = params.cursor;
+  }
+  return `/api/code-trpc/${procedure}?batch=1&input=${encodeURIComponent(JSON.stringify({ 0: { json: input } }))}`;
+}
+const READER_IDLE = 5 * 60 * 1000;
 function bounds(value, size, zoom = 1) {
   if (!value || !['x','y','width','height'].every(k => Number.isFinite(value[k]))) throw new Error('Invalid workspace bounds');
   value = Object.fromEntries(Object.entries(value).map(([key, number]) => [key, number * zoom]));
@@ -46,8 +67,7 @@ function createWorkspace(getWindow) {
     const win = getWindow();
     if (win && !win.isDestroyed()) win.webContents.send('workspace:state', { status: state, detail, section });
   };
-  const getSession = () => {
-    const name = section === 'docs' ? 'persist:mistral-docs' : section === 'admin' ? 'persist:mistral-admin' : 'persist:mistral-workspace';
+  const getSession = (name = section === 'docs' ? 'persist:mistral-docs' : section === 'admin' ? 'persist:mistral-admin' : 'persist:mistral-workspace') => {
     if (partitions.has(name)) return partitions.get(name);
     const partition = session.fromPartition(name);
     partitions.set(name, partition);
@@ -104,16 +124,16 @@ function createWorkspace(getWindow) {
       if (win && !win.isDestroyed()) win.webContents.focus();
     }
   };
-  async function importSignIn(version) {
-    const ses = getSession();
-    const existing = await ses.cookies.get({ url: section === 'admin' ? ROUTES.admin : ORIGIN });
+  async function importSignIn(current, destination = section === 'admin' ? 'admin' : 'work') {
+    const ses = getSession(destination === 'admin' ? 'persist:mistral-admin' : 'persist:mistral-workspace');
+    const existing = await ses.cookies.get({ url: destination === 'admin' ? ROUTES.admin : ORIGIN });
     if (existing.some(cookie => cookie.httpOnly && cookie.secure && cookie.name.startsWith('ory_session_'))) return;
-    const cookies = await browser.workspaceCookies(undefined, section === 'admin' ? 'admin' : 'work');
-    if (version !== generation) return;
+    const cookies = await browser.workspaceCookies(undefined, destination);
+    if (!current()) return;
     try {
       for (const cookie of cookies || []) {
-        if (version !== generation) return;
-        const detail = cookieDetails(cookie, section);
+        if (!current()) return;
+        const detail = cookieDetails(cookie, destination === 'admin' ? 'admin' : 'work');
         if (detail) await ses.cookies.set(detail);
       }
       await ses.cookies.flushStore();
@@ -152,7 +172,7 @@ function createWorkspace(getWindow) {
     try {
       await resetting;
       if (version !== generation) return;
-      importing = importing.catch(() => {}).then(() => version === generation && next !== 'docs' && importSignIn(version));
+      importing = importing.catch(() => {}).then(() => version === generation && next !== 'docs' && importSignIn(() => version === generation));
       await importing;
       if (version !== generation || win.isDestroyed()) return;
       const current = new WebContentsView({ webPreferences: { session: getSession(), sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true } });
@@ -246,12 +266,79 @@ function createWorkspace(getWindow) {
       if (version === generation) notify('error', 'Could not open Mistral. Try Sign in or Refresh.');
     }
   }
-  return { open, close,
+  // A hidden page in the workspace partition answers Vibe Code Web reads, the
+  // way the web app itself fetches them, so Mistral's browser checks pass.
+  let reader = null;
+  const closeReader = () => {
+    const current = reader;
+    reader = null;
+    if (!current) return;
+    clearTimeout(current.timer);
+    if (current.view && !current.view.webContents.isDestroyed()) current.view.webContents.close();
+  };
+  function readerPage() {
+    if (reader) {
+      clearTimeout(reader.timer);
+      reader.timer = setTimeout(closeReader, READER_IDLE);
+      reader.timer.unref?.();
+      return reader.ready;
+    }
+    const current = reader = { view: null, timer: setTimeout(closeReader, READER_IDLE) };
+    current.timer.unref?.();
+    current.ready = (async () => {
+      await resetting;
+      importing = importing.catch(() => {}).then(() => importSignIn(() => reader === current, 'work'));
+      await importing;
+      if (reader !== current) throw new Error('Vibe Code reader closed');
+      const view = current.view = new WebContentsView({ webPreferences: { session: getSession('persist:mistral-workspace'), sandbox: true,
+        contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: false } });
+      const contents = view.webContents;
+      contents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      const guard = (event, url) => {
+        try { if (new URL(url).origin !== ORIGIN && !AUTH.has(new URL(url).origin)) event.preventDefault(); } catch { event.preventDefault(); }
+      };
+      contents.on('will-navigate', guard);
+      contents.on('will-redirect', guard);
+      let timer;
+      try {
+        await Promise.race([contents.loadURL(ORIGIN + '/code'), new Promise((_, reject) => {
+          timer = setTimeout(() => { contents.stop(); reject(new Error('Vibe Code reader timed out')); }, 30000);
+        })]);
+      } finally { clearTimeout(timer); }
+      return contents;
+    })();
+    return current.ready;
+  }
+  async function readCode(procedure, params) {
+    const path = codeReadPath(procedure, params);
+    let contents;
+    try { contents = await readerPage(); } catch { closeReader(); return { status: 0, text: '' }; }
+    let origin = null;
+    try { origin = new URL(contents.getURL()).origin; } catch { /* Treated as signed out below. */ }
+    // A sign-in redirect leaves the page off Mistral; reload after the next sign-in.
+    if (origin !== ORIGIN) { closeReader(); return { status: 401, text: '' }; }
+    try {
+      const result = await contents.executeJavaScript(`(async () => {
+        if (location.origin !== ${JSON.stringify(ORIGIN)}) return { status: 401, text: '' };
+        try {
+          const response = await fetch(${JSON.stringify(path)}, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(20000) });
+          if (response.type === 'opaqueredirect') return { status: 401, text: '' };
+          const text = await response.text();
+          return { status: response.status, text: text.length > 16 * 1024 * 1024 ? '' : text };
+        } catch { return { status: 0, text: '' }; }
+      })()`);
+      if (!result || !Number.isInteger(result.status) || typeof result.text !== 'string') throw new Error('Invalid Vibe Code response');
+      if (result.status === 401) closeReader();
+      return { status: result.status, text: result.text };
+    } catch { closeReader(); return { status: 0, text: '' }; }
+  }
+  return { open, close, readCode,
     resize: rectangle => { lastRectangle = rectangle; if (view) view.setBounds(bounds(rectangle, getWindow().getContentSize(), getWindow().webContents.getZoomFactor())); },
     setZoom: factor => { if (view) view.webContents.setZoomFactor(factor); },
     refresh: () => view ? open(section, lastRectangle, lastTheme, AUTH.has(new URL(view.webContents.getURL()).origin) ? undefined : view.webContents.getURL()) : Promise.resolve(),
     reset: () => {
       close();
+      closeReader();
       permissions.clear();
       permissions.add('clipboard-sanitized-write');
       resetting = resetting.catch(() => {}).then(async () => {
@@ -267,4 +354,4 @@ function createWorkspace(getWindow) {
     },
   };
 }
-module.exports = { createWorkspace, publicRequest, cookieDetails, bounds, ROUTES };
+module.exports = { createWorkspace, publicRequest, cookieDetails, bounds, codeReadPath, ROUTES };

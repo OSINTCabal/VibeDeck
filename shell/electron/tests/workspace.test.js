@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { EventEmitter } = require('node:events');
 function harness() {
-  const views = [], events = [], jar = [], downloads = [], external = [];
+  const views = [], events = [], jar = [], downloads = [], external = [], hooks = {};
   const ses = Object.assign(new EventEmitter(), { cookies: { get: async () => jar, set: async c => jar.push(c), flushStore: async () => {} },
     clearStorageData: async () => { jar.length = 0; }, clearCache: async () => {},
     webRequest: { onBeforeRequest: fn => { ses.request = fn; } },
@@ -15,11 +15,11 @@ function harness() {
       w.focus = () => {};
       w.isDestroyed = () => !!w.destroyed;
       w.close = () => { w.destroyed = true; };
-      w.loadURL = async url => { w.url = url; w.emit('did-finish-load'); };
+      w.loadURL = async url => { w.url = (hooks.load && await hooks.load(url)) || url; w.emit('did-finish-load'); };
       w.setZoomFactor = factor => {w.zoom=factor;};
       w.getURL = () => w.url;
       w.setWindowOpenHandler = fn => { w.popup = fn; };
-      w.executeJavaScript = async code => { if (code.includes('link.download')) downloads.push(code); return true; };
+      w.executeJavaScript = async code => { if (hooks.script) return hooks.script(code, w); if (code.includes('link.download')) downloads.push(code); return true; };
       views.push(this);
     }
     setBounds(rect) { this.rect = rect; }
@@ -33,7 +33,7 @@ function harness() {
   new Function('require', 'module', fs.readFileSync(require.resolve('../workspace'), 'utf8'))(name =>
     name === 'electron' ? { WebContentsView: View, nativeTheme: {}, session: { fromPartition: () => ses }, dialog: { showMessageBox: async () => ({response:1}) }, shell: { openExternal: async url => external.push(url) } } :
     name === './usage-browser' ? browser : name === 'node:dns/promises' ? { lookup: async () => [{address:'1.1.1.1',family:4}] } : require(name), m);
-  return { ...m.exports, controller: m.exports.createWorkspace(() => win), views, events, browser, ses, jar, downloads, external, win };
+  return { ...m.exports, controller: m.exports.createWorkspace(() => win), views, events, browser, ses, jar, downloads, external, win, hooks };
 }
 const rectangle = { x: 0, y: 96, width: 1000, height: 604 };
 test('workspace section follows full and in-page navigation without losing Instructions', async () => {
@@ -277,4 +277,59 @@ test('Admin auth callback stays in its partition and expired flows refresh from 
 test('zoom scales CSS bounds to physical window coordinates', () => {
   const h=harness();
   assert.deepEqual(h.bounds({x:0,y:40,width:800,height:520},[1000,700],1.25),{x:0,y:50,width:1000,height:650});
+});
+test('Vibe Code reads allow only fixed read-only queries with validated ids', () => {
+  const { codeReadPath } = harness();
+  const input = path => JSON.parse(decodeURIComponent(path.split('input=')[1]))[0].json;
+  assert.deepEqual(input(codeReadPath('projects.list')), { direction: 'forward' });
+  assert.deepEqual(input(codeReadPath('sessions.list', { projectId: 'p-1', extra: 'ignored' })), { projectId: 'p-1', includePinned: true, direction: 'forward' });
+  assert.deepEqual(input(codeReadPath('sessions.messages', { sessionId: 's_1', cursor: 'c1' })), { sessionId: 's_1', direction: 'forward', cursor: 'c1' });
+  assert.match(codeReadPath('sessions.list', { projectId: 'p' }), /^\/api\/code-trpc\/sessions\.list\?batch=1&input=/);
+  for (const [procedure, params] of [['sessions.create', {}], ['toString', {}], ['sessions.list', { projectId: '../x' }],
+    ['sessions.list', {}], ['sessions.messages', { sessionId: 's', cursor: 7 }], ['sessions.messages', { sessionId: 'a'.repeat(101) }]])
+    assert.throws(() => codeReadPath(procedure, params), undefined, procedure);
+});
+test('Vibe Code reader fetches in a hidden signed-in page, reuses it, and closes on sign-out or reset', async () => {
+  const h = harness();
+  h.browser.workspaceCookies = async () => [{ domain: '.mistral.ai', name: 'ory_session_x', value: 'v', secure: true, httpOnly: true, path: '/' }];
+  const scripts = [];
+  let reply = { status: 200, text: '[{"result":{}}]' };
+  h.hooks.script = async code => { scripts.push(code); return reply; };
+  assert.deepEqual(await h.controller.readCode('projects.list'), reply);
+  const reader = h.views[0];
+  assert.equal(h.jar.length, 1, 'sign-in imported into the workspace partition');
+  assert.equal(reader.webContents.url, 'https://chat.mistral.ai/code');
+  assert.equal(reader.options.webPreferences.sandbox, true);
+  assert.match(scripts[0], /\/api\/code-trpc\/projects\.list/);
+  assert.equal(reader.webContents.popup({ url: 'https://example.com' }).action, 'deny');
+  const blocked = { preventDefault() { this.prevented = true; } };
+  reader.webContents.emit('will-navigate', blocked, 'https://example.com/');
+  assert.equal(blocked.prevented, true);
+  await h.controller.readCode('sessions.list', { projectId: 'p1' });
+  assert.equal(h.views.length, 1, 'reader page reused');
+  reply = { status: 401, text: '' };
+  assert.deepEqual(await h.controller.readCode('sessions.messages', { sessionId: 's1' }), reply);
+  assert.equal(reader.webContents.isDestroyed(), true, 'a signed-out reader closes so the next read imports a fresh sign-in');
+  reply = { status: 200, text: '[]' };
+  await h.controller.readCode('projects.list');
+  assert.equal(h.views.length, 2);
+  await h.controller.reset();
+  assert.equal(h.views[1].webContents.isDestroyed(), true, 'sign out closes the reader');
+  await assert.rejects(h.controller.readCode('sessions.delete'), /Unknown Vibe Code read/);
+});
+test('Vibe Code reader reports a sign-in redirect, a failed fetch and an unreachable Mistral', async () => {
+  const redirected = harness();
+  redirected.hooks.load = async () => 'https://auth.mistral.ai/login';
+  redirected.hooks.script = async () => ({ status: 200, text: 'never read' });
+  assert.deepEqual(await redirected.controller.readCode('projects.list'), { status: 401, text: '' });
+  assert.equal(redirected.views[0].webContents.isDestroyed(), true);
+  const offline = harness();
+  offline.hooks.load = async () => { throw new Error('net::ERR_INTERNET_DISCONNECTED'); };
+  assert.deepEqual(await offline.controller.readCode('projects.list'), { status: 0, text: '' });
+  assert.equal(offline.views[0].webContents.isDestroyed(), true);
+  offline.hooks.load = null;
+  offline.hooks.script = async () => { throw new Error('page crashed'); };
+  assert.deepEqual(await offline.controller.readCode('projects.list'), { status: 0, text: '' });
+  offline.hooks.script = async () => ({ status: 'ok' });
+  assert.deepEqual(await offline.controller.readCode('projects.list'), { status: 0, text: '' }, 'malformed page replies are rejected');
 });

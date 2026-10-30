@@ -164,6 +164,29 @@ async def run():
             payload = {"current": "main", "branches": ["main"], "dirty": False, "isRepo": True}
         elif path == "/api/projects":
             payload = {"home": "/tmp", "known": [{"name": "Example project", "path": "/tmp/example"}], "recent": []}
+        elif path.startswith("/api/cloud/"):
+            body = request.post_data_json
+            raw = json.loads(body["text"]) if body["status"] == 200 else None
+            if raw is None:
+                payload = {"error": {"code": "signed_out", "message": "Sign in to Mistral to see your Vibe Code Web sessions."}}
+            elif path == "/api/cloud/projects":
+                payload = {"nextCursor": None, "projects": [
+                    {"id": "p-local", "name": "example", "url": "https://chat.mistral.ai/code/p-local", "repos": [], "localPath": "/tmp/example"},
+                    {"id": "p-cloud", "name": "dual-my-sense", "url": "https://chat.mistral.ai/code/p-cloud", "repos": [], "localPath": None}]}
+            elif path == "/api/cloud/sessions":
+                project = body["projectId"]
+                assert raw == {"procedure": "sessions.list", "params": {"projectId": project}}, raw
+                title = "Matched cloud session" if project == "p-local" else "Оновлення інтерфейсу"
+                payload = {"nextCursor": None, "sessions": [{"id": "s-" + project[2:], "projectId": project, "title": title, "status": "blocked",
+                           "url": f"https://chat.mistral.ai/code/{project}/s-{project[2:]}", "createdAt": time.time(), "updatedAt": time.time(), "unseen": False, "pinned": False}]}
+            else:
+                assert raw == {"procedure": "sessions.messages", "params": {"sessionId": body["sessionId"]}}, raw
+                payload = {"nextCursor": None, "entries": [
+                    {"id": "c1", "type": "message", "role": "user", "content": [{"type": "text", "text": "Онови інтерфейс"}], "createdAt": 1, "updatedAt": 1},
+                    {"id": "c2", "type": "reasoning", "text": "Cloud reasoning", "createdAt": 1793385883244, "updatedAt": 1793385885244},
+                    {"id": "c3", "type": "effect", "title": "bash", "detail": {"toolName": "bash", "input": {"command": "ls"}, "display": {"summary": "ls"}},
+                     "state": {"status": "completed", "outputText": "src"}, "createdAt": 1, "updatedAt": 1},
+                    {"id": "c4", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud reply"}], "createdAt": 1, "updatedAt": 1}]}
         elif path == "/api/usage":
             payload = {"status": "partial", "source": "admin", "account": {"plan": "Pro", "status": "ready"}, "allowances": [], "billing": None,
                        "local": {"rows": [], "observedSince": None, "historicalTotals": {"estimated_cost_usd": 0}}}
@@ -211,7 +234,10 @@ async def run():
         context = await browser.new_context(viewport={"width": 1440, "height": 900})
         await context.route("**/*", route)
         await context.add_init_script('''window.usageConnected = false; window.usagePercent = 25;
-window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
+Object.defineProperty(window, "cloudSignedIn", { get: () => localStorage.getItem("fixture.cloud-signed-out") !== "1",
+  set: value => localStorage.setItem("fixture.cloud-signed-out", value ? "0" : "1") }); window.cloudReads = [];
+window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) => { window.cloudReads.push(procedure);
+  return window.cloudSignedIn ? { status: 200, text: JSON.stringify({ procedure, params }) } : { status: 401, text: "" }; } }, getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
  account: async () => ({remembered:window.usageConnected}),
  connect: async () => { window.usageConnected = true; window.dispatchEvent(new Event('focus')); return true; },
  disconnect: async () => { if (window.failDisconnect) throw new Error('Fixture disconnect failed'); window.usageConnected = false; },
@@ -648,7 +674,8 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         assert all(a["y"] + a["height"] <= b["y"] + .5 for a, b in zip(boxes, boxes[1:])), ("Overlapping menu rows", boxes)
         await page.keyboard.press("Escape")
         await page.get_by_role("button", name="Select model", exact=True).click()
-        model_menu = page.get_by_role("menu")
+        # the agent menu may still be animating closed beside the new one
+        model_menu = page.locator('[role="menu"][data-state="open"]')
         await model_menu.evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
         assert await model_menu.evaluate("m => [...m.querySelectorAll('div')].every(e => e.scrollWidth <= e.clientWidth + 1)"), "Model menu scrolls sideways"
         await page.keyboard.press("Escape")
@@ -782,6 +809,40 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.get_by_role("link", name="Agents", exact=True).click()
         await expect(page.get_by_role("heading", name="Agents", exact=True)).to_be_visible()
         await expect(page.get_by_text("ask", exact=True).first).to_be_visible()
+        # Vibe Code Web sessions nest under the matching local project or their
+        # own cloud project and open read-only with a link to the web app.
+        await page.set_viewport_size({"width": 1440, "height": 900})
+        await page.goto(base)
+        await page.get_by_role("button", name="Code", exact=True).click()
+        sidebar = page.locator("aside")
+        await expect(sidebar.get_by_role("link", name="Matched cloud session", exact=False)).to_be_visible()
+        cloud_project = sidebar.get_by_role("button", name="dual-my-sense", exact=False)
+        await expect(cloud_project).to_have_attribute("aria-expanded", "true")
+        await sidebar.get_by_role("link", name="Оновлення інтерфейсу", exact=False).click()
+        await expect(page).to_have_url(base + "/cloud/p-cloud/s-cloud")
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await expect(page.get_by_role("button", name="Thought for 2s", exact=True)).to_be_visible()
+        await expect(page.get_by_role("link", name="Open on chat.mistral.ai", exact=True)).to_have_attribute("href", "https://chat.mistral.ai/code/p-cloud/s-cloud")
+        await expect(page.locator("[data-vd-composer]")).to_have_count(0)
+        await page.screenshot(path=str(artifacts / "cloud-session.png"))
+        await cloud_project.click()
+        await expect(cloud_project).to_have_attribute("aria-expanded", "false")
+        await cloud_project.click()
+        await page.evaluate("window.cloudSignedIn = false")
+        await page.get_by_role("button", name="Refresh conversation", exact=True).click()
+        await expect(page.get_by_text("Sign in to Mistral to see your Vibe Code Web sessions.", exact=True)).to_be_visible()
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await page.reload()
+        await expect(page.get_by_role("button", name="Sign in to Mistral", exact=True)).to_be_visible()
+        await expect(sidebar.get_by_text("Sign in to Mistral to list your Vibe Code Web sessions.", exact=True)).to_be_visible()
+        await expect(sidebar.get_by_role("button", name="dual-my-sense", exact=False)).to_have_count(0)
+        await page.screenshot(path=str(artifacts / "cloud-signed-out.png"))
+        await page.evaluate("window.vibedeck.workspace = { signIn: async () => { window.cloudSignedIn = true; return true; } }")
+        await sidebar.get_by_role("button", name="Sign in", exact=True).click()
+        await expect(sidebar.get_by_role("button", name="dual-my-sense", exact=False)).to_be_visible()
+        await page.get_by_role("button", name="Sign in to Mistral", exact=True).click()
+        await expect(page.get_by_text("Cloud reply", exact=True)).to_be_visible()
+        await page.evaluate("delete window.vibedeck.workspace")
         await page.goto(base + "/settings")
         await page.emulate_media(reduced_motion="no-preference")
         frames = await page.evaluate("""async () => {
@@ -811,7 +872,7 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         assert not external, external
         await browser.close()
     server.shutdown()
-    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
+    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, cloud sessions and sign-in, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
 
 
 if __name__ == "__main__":

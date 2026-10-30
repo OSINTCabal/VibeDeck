@@ -12,6 +12,7 @@ import { WorkContextView, type WorkSection } from "@/views/WorkContextView";
 import { WorkspaceView } from "@/views/WorkspaceView";
 import { ExtensionsView } from "@/views/ExtensionsView";
 
+const CloudSessionView = lazy(() => import("@/views/CloudSessionView").then(module => ({ default: module.CloudSessionView })));
 const SessionView = lazy(() => import("@/views/SessionView").then(module => ({ default: module.SessionView })));
 const Playground = lazy(() => import("@/views/studio/Playground").then(module => ({ default: module.Playground })));
 const UsageView = lazy(() => import("@/views/UsageView").then(module => ({ default: module.UsageView })));
@@ -24,6 +25,7 @@ export default function App() {
         <Route path="/" element={<AppShell />}>
           <Route index element={<Welcome />} />
           <Route path="sessions/:id" element={<SessionView />} />
+          <Route path="cloud/:projectId/:sessionId" element={<CloudSessionView />} />
           <Route path="studio" element={<StudioLayout />}>
             <Route index element={<Navigate to="/studio/playground" replace />} />
             <Route path="playground" element={<Playground />} />

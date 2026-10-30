@@ -267,3 +267,20 @@ export interface UsageSnapshot {
     completion_tokens: number; cached_tokens: number; estimated_cost_usd: number }[];
     observedSince: number | null; historicalTotals: StudioCosts["total"] };
 }
+
+// ---- Vibe Code Web (cloud) sessions, read-only
+
+/** A raw tRPC response the desktop shell read with the web sign-in. */
+export interface CloudRaw { status: number; text: string }
+export type CloudErrorCode = "offline" | "signed_out" | "blocked" | "not_found" | "unavailable";
+export interface CloudError { code: CloudErrorCode; message: string }
+export interface CloudWebProject {
+  id: string; name: string; url: string;
+  repos: { url: string; key: string | null; branch: string | null }[];
+  /** Local repository with the same remote, when there is one. */
+  localPath: string | null;
+}
+export interface CloudSession {
+  id: string; projectId: string; title: string; status: string; url: string;
+  createdAt: number; updatedAt: number; unseen: boolean; pinned: boolean;
+}

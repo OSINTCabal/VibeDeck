@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
+import cloud_sessions
 import cloud_teleport
 import git_projects
 import httpx
@@ -1905,6 +1906,65 @@ async def cloud_teleport_cancel(sid: str, op_id: str) -> dict:
     except BridgeError as e:
         raise HTTPException(409, e.message) from e
     return op.view()
+
+
+# ---- Vibe Code Web sessions (read-only). The desktop shell reads the raw
+# tRPC responses with the web sign-in; the sidecar parses them.
+
+class CloudPayload(BaseModel):
+    status: int = Field(..., ge=0, le=599)
+    text: str = Field("", max_length=16 * 1024 * 1024)
+
+
+class CloudSessionsReq(CloudPayload):
+    project_id: str = Field(..., alias="projectId", min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CloudMessagesReq(CloudPayload):
+    session_id: str = Field(..., alias="sessionId", min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+def _cloud_error(e: cloud_sessions.CloudError) -> dict:
+    return {"error": {"code": e.code, "message": e.message}}
+
+
+async def _local_repo_remotes() -> list[tuple[str, list[str]]]:
+    """Local repositories with their remotes: session folders first, then discovered repos."""
+    home = Path.home()
+    recent = list(dict.fromkeys((row.get("cwd") or "").strip() for row in store.list_sessions()))
+    recent = [p for p in recent if p and Path(p).is_dir()]
+    paths = [*recent, *(r["path"] for r in await _discover_repos(home, recent))]
+    return [(p, cloud_sessions.git_remote_urls(Path(p), git_projects.git_dir(Path(p))))
+            for p in dict.fromkeys(paths)]
+
+
+@app.post("/api/cloud/projects")
+async def cloud_projects(r: CloudPayload) -> dict:
+    try:
+        projects, cursor = cloud_sessions.parse_projects(cloud_sessions.unwrap(r.status, r.text))
+    except cloud_sessions.CloudError as e:
+        return _cloud_error(e)
+    return {"projects": cloud_sessions.match_local(projects, await _local_repo_remotes()), "nextCursor": cursor}
+
+
+@app.post("/api/cloud/sessions")
+async def cloud_sessions_list(r: CloudSessionsReq) -> dict:
+    try:
+        sessions, cursor = cloud_sessions.parse_sessions(cloud_sessions.unwrap(r.status, r.text), r.project_id)
+    except cloud_sessions.CloudError as e:
+        return _cloud_error(e)
+    return {"sessions": sessions, "nextCursor": cursor}
+
+
+@app.post("/api/cloud/messages")
+async def cloud_messages(r: CloudMessagesReq) -> dict:
+    try:
+        entries, cursor = cloud_sessions.parse_messages(cloud_sessions.unwrap(r.status, r.text), r.session_id)
+    except cloud_sessions.CloudError as e:
+        return _cloud_error(e)
+    return {"entries": entries, "nextCursor": cursor}
 
 
 @app.get("/api/studio/costs")

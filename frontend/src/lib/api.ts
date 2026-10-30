@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts,
+  StudioCosts, CloudRaw, CloudError, CloudWebProject, CloudSession, HistoryEntry,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -302,3 +302,13 @@ export const cloudTeleportStatus = (sid: string, op: string) => cloud(sid, `/tel
 export const cloudTeleportPush = (sid: string, op: string, approved: boolean) =>
   cloud(sid, `/teleport/${op}/push`, { approved }) as Promise<TeleportStatus>;
 export const cloudTeleportCancel = (sid: string, op: string) => cloud(sid, `/teleport/${op}/cancel`, {}) as Promise<TeleportStatus>;
+
+// ---------------------------------------------------------------- Vibe Code Web (cloud) sessions
+
+type CloudResult<T> = T & { error?: CloudError };
+export const parseCloudProjects = (raw: CloudRaw) =>
+  http<CloudResult<{ projects: CloudWebProject[]; nextCursor: string | null }>>("/api/cloud/projects", { method: "POST", body: JSON.stringify(raw) });
+export const parseCloudSessions = (projectId: string, raw: CloudRaw) =>
+  http<CloudResult<{ sessions: CloudSession[]; nextCursor: string | null }>>("/api/cloud/sessions", { method: "POST", body: JSON.stringify({ ...raw, projectId }) });
+export const parseCloudMessages = (sessionId: string, raw: CloudRaw) =>
+  http<CloudResult<{ entries: HistoryEntry[]; nextCursor: string | null }>>("/api/cloud/messages", { method: "POST", body: JSON.stringify({ ...raw, sessionId }) });
