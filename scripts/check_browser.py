@@ -647,6 +647,11 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         boxes = [await row.bounding_box() for row in await rows.all()]
         assert all(a["y"] + a["height"] <= b["y"] + .5 for a, b in zip(boxes, boxes[1:])), ("Overlapping menu rows", boxes)
         await page.keyboard.press("Escape")
+        await page.get_by_role("button", name="Select model", exact=True).click()
+        model_menu = page.get_by_role("menu")
+        await model_menu.evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
+        assert await model_menu.evaluate("m => [...m.querySelectorAll('div')].every(e => e.scrollWidth <= e.clientWidth + 1)"), "Model menu scrolls sideways"
+        await page.keyboard.press("Escape")
         await page.screenshot(path=str(artifacts / "agent-menu-short.png"))
         await page.set_viewport_size({"width": 420, "height": 820})
         await page.locator("aside").first.evaluate("e => Promise.all(e.getAnimations().map(a => a.finished)).then(() => new Promise(r => setTimeout(r, 250)))")

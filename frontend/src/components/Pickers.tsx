@@ -184,7 +184,7 @@ export function ModelPicker({
           data-state={presence.state}
           role="menu"
           className={cn(
-            menuPanel, "absolute right-0 z-50 w-72 max-w-[calc(100vw-2rem)] overflow-hidden",
+            menuPanel, "absolute right-0 z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
           )}
         >
@@ -199,7 +199,7 @@ export function ModelPicker({
             />
           </div>
           <div className="my-1 h-px bg-border" />
-          <div className="grid content-start gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
+          <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-1 overflow-y-auto overflow-x-hidden" style={{ maxHeight: listMaxH }}>
             {filtered.length === 0 && (
               <div className="px-3 py-3 text-sm text-text-faint">No models match.</div>
             )}
@@ -464,7 +464,7 @@ export function AgentPicker({
           )}
         >
           <div className={menuLabel}>Mode</div>
-          <div className="grid content-start gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
+          <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-1 overflow-y-auto overflow-x-hidden" style={{ maxHeight: listMaxH }}>
             {modes.map((a) => renderRow(a))}
             {subagents.length > 0 && (
               <>
