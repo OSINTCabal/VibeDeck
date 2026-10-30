@@ -63,7 +63,8 @@ function createDesktop({ getWindow, showWindow, navigate, onChange }) {
   function start() {
     if (tray) return;
     try {
-      const icon = nativeImage.createFromPath(path.join(__dirname, "vibedeck-icon.png"));
+      // The bare mark reads better than the app tile at tray size.
+      const icon = nativeImage.createFromPath(path.join(__dirname, "vibedeck-tray.png"));
       tray = new Tray(icon.isEmpty() ? icon : icon.resize({ width: process.platform === "darwin" ? 16 : 22, quality: "best" }));
     } catch {
       tray = null; // No system tray available; closing then behaves normally.

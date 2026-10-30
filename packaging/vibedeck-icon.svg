@@ -1,31 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
-<rect width="1000" height="1000" rx="235" fill="#161616"/>
-<g transform="translate(180.0000 208.7500)">
-<rect fill="#000000" x="465.4545" y="0.0000" width="116.3636" height="116.3636"/>
-<rect fill="#F7D046" x="523.6364" y="0.0000" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="0.0000" y="0.0000" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="0.0000" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="0.0000" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="0.0000" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="0.0000" y="465.4545" width="116.3636" height="116.3636"/>
-<rect fill="#F7D046" x="58.1818" y="0.0000" width="116.3636" height="116.3636"/>
-<rect fill="#F2A73B" x="523.6364" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#F2A73B" x="58.1818" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="349.0909" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#F2A73B" x="407.2727" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#F2A73B" x="174.5455" y="116.3636" width="116.3636" height="116.3636"/>
-<rect fill="#EE792F" x="290.9091" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#EE792F" x="407.2727" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#EE792F" x="174.5455" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="232.7273" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#EB5829" x="290.9091" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#EE792F" x="523.6364" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#EE792F" x="58.1818" y="232.7273" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="465.4545" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#EB5829" x="523.6364" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#000000" x="465.4545" y="465.4545" width="116.3636" height="116.3636"/>
-<rect fill="#EB5829" x="58.1818" y="349.0909" width="116.3636" height="116.3636"/>
-<rect fill="#EA3326" x="523.6364" y="465.4545" width="116.3636" height="116.3636"/>
-<rect fill="#EA3326" x="58.1818" y="465.4545" width="116.3636" height="116.3636"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" shape-rendering="crispEdges">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262c"/>
+      <stop offset="1" stop-color="#0f0f12"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)" shape-rendering="geometricPrecision"/>
+  <rect x="1.5" y="1.5" width="1021" height="1021" rx="230.5" fill="none" stroke="url(#sheen)" stroke-width="3" shape-rendering="geometricPrecision"/>
+  <rect x="312" y="312" width="80" height="80" fill="#FFAF01"/>
+  <rect x="632" y="312" width="80" height="80" fill="#FFAF01"/>
+  <rect x="312" y="392" width="160" height="80" fill="#FF8204"/>
+  <rect x="552" y="392" width="160" height="80" fill="#FF8204"/>
+  <rect x="312" y="472" width="400" height="80" fill="#FA500F"/>
+  <rect x="312" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="472" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="632" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="232" y="632" width="240" height="80" fill="#C4001D"/>
+  <rect x="552" y="632" width="240" height="80" fill="#C4001D"/>
 </svg>

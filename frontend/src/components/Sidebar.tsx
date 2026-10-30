@@ -150,14 +150,14 @@ export function Sidebar({
               className={cn("flex h-8 items-center gap-2 rounded-md pl-1 pr-1.5 text-text transition-colors hover:bg-surface-muted active:bg-surface-muted/70", menuOpen && "bg-surface-muted")}
             >
               <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary">
-                <MistralLogo size={15} className="fill-white" />
+                <MistralLogo size={15} mono className="fill-white" />
               </span>
               <span className="text-base font-semibold leading-none">Vibe</span>
               <ChevronDown size={16} className={cn("text-text-muted transition-transform duration-150 motion-reduce:transition-none", menuOpen && "rotate-180")} />
             </button>
             {menuPresence.mounted && <nav id="vibe-navigation" aria-label="Vibe navigation" data-state={menuPresence.state} className={cn(menuPanel, "absolute left-0 top-full z-50 mt-1 flex w-[232px] max-h-[calc(100vh-8rem)] flex-col gap-1 overflow-y-auto")}>
-              <a onClick={() => setMenuOpen(false)} href="https://console.mistral.ai/" target="_blank" rel="noreferrer" className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary"><MistralLogo size={15} className="fill-white" /></span>Studio</a>
-              {[{to:"/workspace/docs",label:"Docs & API"},{to:"/workspace/admin",label:"Admin"}].map(item => <NavLink key={item.to} to={item.to} className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-text-faint"><MistralLogo size={15} className="fill-white" /></span>{item.label}</NavLink>)}
+              <a onClick={() => setMenuOpen(false)} href="https://console.mistral.ai/" target="_blank" rel="noreferrer" className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-primary"><MistralLogo size={15} mono className="fill-white" /></span>Studio</a>
+              {[{to:"/workspace/docs",label:"Docs & API"},{to:"/workspace/admin",label:"Admin"}].map(item => <NavLink key={item.to} to={item.to} className={menuItem}><span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-text-faint"><MistralLogo size={15} mono className="fill-white" /></span>{item.label}</NavLink>)}
             </nav>}
           </div>
           <div className="flex-1" />

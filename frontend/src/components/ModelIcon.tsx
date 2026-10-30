@@ -2,15 +2,8 @@ import { Sparkles } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MistralLogo } from "./Logo";
 
-// Mistral models carry the pixel mark, tinted by tier (large → small, like
-// Mistral's own orange-to-yellow ramp); other families get their own mark.
-const MISTRAL_TINTS: [RegExp, string][] = [
-  [/large|magistral-medium/, "fill-[#FF4A00]"],
-  [/devstral|codestral/, "fill-[#FA6B1E]"],
-  [/medium/, "fill-[#FF8205]"],
-  [/small|magistral/, "fill-[#FFAF00]"],
-  [/ministral|tiny|nemo/, "fill-[#FFD800]"],
-];
+// Mistral models carry the official gradient pixel mark (the brand guidelines
+// ask not to recolour it); other families get their own mark.
 
 function PixelGlm({ size }: { size: number }) {
   // a 4x4 pixel lattice in GLM's blue
@@ -27,8 +20,7 @@ export function ModelIcon({ id, size = 14, className }: { id: string; size?: num
   let icon: React.ReactNode;
   if (/glm|zai|zhipu/.test(key)) icon = <PixelGlm size={size - 2} />;
   else if (/mistral|stral|ministral|pixtral|nemo/.test(key)) {
-    const tint = MISTRAL_TINTS.find(([re]) => re.test(key))?.[1] || "fill-[#FF4A00]";
-    icon = <MistralLogo size={size} className={tint} />;
+    icon = <MistralLogo size={size} />;
   } else icon = <Sparkles size={size - 2} className="text-text-muted" />;
   return <span className={cn("grid shrink-0 place-items-center", className)} style={{ width: size, height: size }}>{icon}</span>;
 }
