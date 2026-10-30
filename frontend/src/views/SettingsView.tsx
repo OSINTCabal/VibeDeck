@@ -12,8 +12,9 @@ import {
   notificationsEnabled, setNotificationsEnabled, notificationsSupported,
 } from "@/lib/notifications";
 import { Check, Plug, Boxes, SlidersHorizontal } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, modelLabel } from "@/lib/utils";
 import type { ApiKeyStatus } from "@/lib/types";
+import type { DesktopSettings } from "@/lib/windowControls";
 
 const AGENTS = [
   { value: "ask", label: "ask — asks permission for actions that need approval" },
@@ -112,8 +113,8 @@ export function SettingsView() {
   };
 
   const modelOptions = models.length
-    ? models.map((m) => ({ value: m.id, label: m.id }))
-    : [{ value: model, label: model }];
+    ? models.map((m) => ({ value: m.id, label: modelLabel(m.id, m.name) }))
+    : [{ value: model, label: modelLabel(model) }];
 
   const ksl = keyStatusLabel(keyStatus);
 
@@ -246,6 +247,7 @@ export function SettingsView() {
             </div>
             <NotificationsToggle />
           </div>
+          <TrayControl />
           <div>
             <label className="block text-xs font-medium text-text-muted mb-1.5">Default lane</label>
             <DefaultLaneSelect />
@@ -495,6 +497,50 @@ function ZoomControl() {
   </div>;
 }
 
+
+function TrayControl() {
+  const desktop = window.vibedeck?.desktop;
+  const [settings, setSettings] = React.useState<DesktopSettings | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  React.useEffect(() => { void desktop?.get().then(setSettings).catch(() => setError("Could not read desktop settings.")); }, [desktop]);
+  if (!desktop) return null;
+  const toggle = async (closeToTray: boolean) => {
+    if (busy) return;
+    setBusy(true); setError("");
+    try { setSettings(await desktop.set({ closeToTray })); }
+    catch { setError("Could not save this setting. Try again."); }
+    finally { setBusy(false); }
+  };
+  const enabled = !!settings?.closeToTray;
+  const available = !!settings?.tray;
+  return <div>
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="text-xs font-medium text-text-muted">Keep running in the tray</div>
+        <p className="text-xs text-text-faint mt-0.5">{settings && !available
+          ? "Your desktop has no system tray, so closing the window quits VibeDeck."
+          : "Closing the window hides VibeDeck to the tray icon. Quit from the tray menu."}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-label="Keep running in the tray"
+        aria-checked={enabled}
+        disabled={busy || !available}
+        onClick={() => void toggle(!enabled)}
+        className={cn(
+          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+          enabled ? "bg-primary" : "bg-surface-muted",
+          (busy || !available) && "opacity-50",
+        )}
+      >
+        <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", enabled ? "left-[18px]" : "left-0.5")} />
+      </button>
+    </div>
+    {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+  </div>;
+}
 
 function Subagents() {
   const [settings, setSettings] = React.useState<SubagentSettings | null>(null);

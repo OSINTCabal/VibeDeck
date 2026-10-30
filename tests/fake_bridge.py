@@ -67,4 +67,49 @@ class FakeBridge(VibeAppServer):
             self.states[sid]["session"]["status"] = {"type": "idle"}
         elif method == "workspace/git/worktrees/list":
             return {"worktrees": []}
+        elif method.startswith("vibeCode/"):
+            return self._vibe_code(method, params)
+        return {}
+
+    # ---- Vibe Code Web: a picker with one linked project; teleport events are
+    # pushed to subscribers like real notifications.
+    PROJECT = {"projectId": "p1", "name": "repo", "repositories": [{"repoUrl": "https://github.com/me/repo", "defaultBranch": "main"}], "isReadOnly": False}
+
+    def _view(self, projects):
+        return {"context": {"repoRoot": self.cwd, "repoUrl": "https://github.com/me/repo", "repoName": "me/repo", "savedLink": None},
+                "state": {"projects": projects, "nextCursor": None, "repoUrl": "https://github.com/me/repo"},
+                "git": {"remoteName": "origin", "remoteUrl": "git@github.com:me/repo.git", "repo": "me/repo", "branch": "main", "defaultBranch": "main"}}
+
+    def _emit(self, operation_id, kind, **extra):
+        for q in list(self._subscribers):
+            q.put_nowait({"method": "vibeCode/teleport/event", "params": {"event": {"kind": kind, "operationId": operation_id, **extra}}})
+
+    def _vibe_code(self, method, params):
+        if method == "vibeCode/projects/open":
+            return {"pickerId": "picker-1", "view": self._view([self.PROJECT]), "resolvedProjectId": None}
+        if method == "vibeCode/projects/select":
+            if params["projectId"] not in ("p1", "p2"):
+                raise BridgeError("invalid_params", f"Unknown Vibe Code project: {params['projectId']}")
+            return {"view": self._view([self.PROJECT]), "project": {**self.PROJECT, "projectId": params["projectId"]}}
+        if method == "vibeCode/projects/create":
+            project = {**self.PROJECT, "projectId": "p2", "name": params["name"]}
+            return {"view": self._view([self.PROJECT, project]), "project": project}
+        if method == "vibeCode/projects/cancel":
+            return {}
+        if method == "vibeCode/teleport/start":
+            self.teleport_op = params["operationId"]
+            self._emit(self.teleport_op, "summarizing_context")
+            self._emit(self.teleport_op, "checking_git")
+            self._emit(self.teleport_op, "push_required", unpushedCount=2, branchNotPushed=False)
+            return {"operationId": self.teleport_op}
+        if method == "vibeCode/teleport/push/respond":
+            if params["approved"]:
+                self._emit(params["operationId"], "pushing")
+                self._emit(params["operationId"], "starting_workflow")
+                self._emit(params["operationId"], "complete", url="https://chat.mistral.ai/code/s/123")
+            else:
+                self._emit(params["operationId"], "failed", error={"code": "push_declined", "message": "Push was declined."})
+            return {}
+        if method == "vibeCode/teleport/cancel":
+            return {"cancelled": True}
         return {}
