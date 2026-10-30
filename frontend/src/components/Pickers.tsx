@@ -199,7 +199,7 @@ export function ModelPicker({
             />
           </div>
           <div className="my-1 h-px bg-border" />
-          <div className="flex flex-col gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
+          <div className="grid content-start gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
             {filtered.length === 0 && (
               <div className="px-3 py-3 text-sm text-text-faint">No models match.</div>
             )}
@@ -422,7 +422,7 @@ export function AgentPicker({
         <span className="min-w-0 flex-1">
           <span className="block">{a.displayName || a.name}</span>
           {a.description && (
-            <span className="block truncate text-xs text-text-muted mt-0.5">{a.description}</span>
+            <span className="block line-clamp-2 text-xs text-text-muted mt-0.5">{a.description}</span>
           )}
         </span>
         <RadioMark checked={active} className="mt-0.5" />
@@ -456,7 +456,7 @@ export function AgentPicker({
           )}
         >
           <div className={menuLabel}>Mode</div>
-          <div className="flex flex-col gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
+          <div className="grid content-start gap-1 overflow-y-auto" style={{ maxHeight: listMaxH }}>
             {modes.map((a) => renderRow(a))}
             {subagents.length > 0 && (
               <>

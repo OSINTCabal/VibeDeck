@@ -20,7 +20,7 @@ export function usePresence(open: boolean, ms = 150) {
 
 /** Shared popover panel and row styles (the webapp's dropdown menu). */
 export const menuPanel = "vd-menu rounded-xl border border-border bg-surface-raised p-1 shadow-lg";
-export const menuItem = "flex w-full min-h-9 items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-muted focus-visible:bg-surface-muted focus-visible:outline-none";
+export const menuItem = "flex w-full min-h-9 shrink-0 items-center gap-2 rounded-sm px-3 py-2 text-left text-sm text-text transition-colors hover:bg-surface-muted focus-visible:bg-surface-muted focus-visible:outline-none";
 export const menuLabel = "px-3 pt-2 pb-1 text-xs font-medium text-text-faint";
 
 // ---------------------------------------------------------------- Radio mark
