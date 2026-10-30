@@ -54,6 +54,8 @@ async def run():
     shared_skills = False
     agent_settings = {"policy":"requested","quality":"balanced","max_workers":2}
     agent_saves = []
+    # polls left before the fixture's cloud turn ends; a sent prompt runs until Stop
+    cloud_writes, cloud_turn = [], {"polls": 0}
     agent_settings_corrupt = False
     skills_rows = []
     provider_rows = [{"name": "mistral", "apiBase": "https://api.mistral.ai/v1", "apiStyle": "openai", "backend": "mistral", "apiKeyEnvVar": "MISTRAL_API_KEY", "builtin": True, "key": {"present": True, "source": "keyring"}, "models": [{"alias": "mistral-large-4", "name": "mistral-large-4", "provider": "mistral"}]}]
@@ -179,14 +181,37 @@ async def run():
                 title = "Matched cloud session" if project == "p-local" else "Оновлення інтерфейсу"
                 payload = {"nextCursor": None, "sessions": [{"id": "s-" + project[2:], "projectId": project, "title": title, "status": "blocked",
                            "url": f"https://chat.mistral.ai/code/{project}/s-{project[2:]}", "createdAt": time.time(), "updatedAt": time.time(), "unseen": False, "pinned": False}]}
+            elif path == "/api/cloud/session":
+                assert raw == {"procedure": "sessions.byId", "params": {"sessionId": "s-cloud"}}, raw
+                active = cloud_turn["polls"] > 0
+                if active and cloud_turn["polls"] < 1000:
+                    cloud_turn["polls"] -= 1
+                payload = {"session": {"id": "s-cloud", "status": "active" if active else "blocked",
+                                       "waitKind": None, "title": "Оновлення інтерфейсу", "active": active}}
+            elif path == "/api/cloud/result":
+                cloud_writes.append(raw)
+                cloud_turn["polls"] = {"sessions.sendMessage": 1000, "sessions.respondCallback": 1}.get(raw["procedure"], 0)
+                payload = {"ok": True}
             else:
                 assert raw == {"procedure": "sessions.messages", "params": {"sessionId": body["sessionId"]}}, raw
+                procedures = [w["procedure"] for w in cloud_writes]
+                cloud_question = [] if "sessions.respondCallback" in procedures else [
+                    {"id": "c5", "type": "callback", "callbackId": "cb-theme", "title": "Question", "state": {"status": "open"},
+                     "detail": {"kind": "user_input", "cloudCallback": "ask_user_question",
+                                "request": {"questions": [{"question": "Which theme?", "hideOther": False, "options": [{"label": "Dark"}, {"label": "Light"}]}]}},
+                     "createdAt": 1, "updatedAt": 1}]
+                follow_up = [
+                    {"id": "c6", "type": "message", "role": "user", "content": [{"type": "text", "text": w["params"]["text"]}], "createdAt": 1, "updatedAt": 1}
+                    for w in cloud_writes if w["procedure"] == "sessions.sendMessage"]
+                if follow_up:
+                    follow_up.append({"id": "c7", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud follow-up"}], "createdAt": 1, "updatedAt": 1})
                 payload = {"nextCursor": None, "entries": [
                     {"id": "c1", "type": "message", "role": "user", "content": [{"type": "text", "text": "Онови інтерфейс"}], "createdAt": 1, "updatedAt": 1},
                     {"id": "c2", "type": "reasoning", "text": "Cloud reasoning", "createdAt": 1793385883244, "updatedAt": 1793385885244},
                     {"id": "c3", "type": "effect", "title": "bash", "detail": {"toolName": "bash", "input": {"command": "ls"}, "display": {"summary": "ls"}},
                      "state": {"status": "completed", "outputText": "src"}, "createdAt": 1, "updatedAt": 1},
-                    {"id": "c4", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud reply"}], "createdAt": 1, "updatedAt": 1}]}
+                    {"id": "c4", "type": "message", "role": "assistant", "content": [{"type": "text", "text": "Cloud reply"}], "createdAt": 1, "updatedAt": 1},
+                    *cloud_question, *follow_up]}
         elif path == "/api/usage":
             payload = {"status": "partial", "source": "admin", "account": {"plan": "Pro", "status": "ready"}, "allowances": [], "billing": None,
                        "local": {"rows": [], "observedSince": None, "historicalTotals": {"estimated_cost_usd": 0}}}
@@ -237,7 +262,8 @@ async def run():
 Object.defineProperty(window, "cloudSignedIn", { get: () => localStorage.getItem("fixture.cloud-signed-out") !== "1",
   set: value => localStorage.setItem("fixture.cloud-signed-out", value ? "0" : "1") }); window.cloudReads = [];
 window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) => { window.cloudReads.push(procedure);
-  return window.cloudSignedIn ? { status: 200, text: JSON.stringify({ procedure, params }) } : { status: 401, text: "" }; } }, getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
+  return window.cloudSignedIn ? { status: 200, text: JSON.stringify({ procedure, params }) } : { status: 401, text: "" }; },
+  write: async (procedure, params) => ({ status: 200, text: JSON.stringify({ procedure, params }) }) }, getZoom: async () => Number(localStorage.getItem("fixture.zoom") || 1), setZoom: async value => { localStorage.setItem("fixture.zoom",String(value)); return value; }, getState: async () => ({ maximized: false }), onState: () => () => {}, minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {}, pickDirectory: async () => null, usage: {
  account: async () => ({remembered:window.usageConnected}),
  connect: async () => { window.usageConnected = true; window.dispatchEvent(new Event('focus')); return true; },
  disconnect: async () => { if (window.failDisconnect) throw new Error('Fixture disconnect failed'); window.usageConnected = false; },
@@ -810,7 +836,7 @@ window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) 
         await expect(page.get_by_role("heading", name="Agents", exact=True)).to_be_visible()
         await expect(page.get_by_text("ask", exact=True).first).to_be_visible()
         # Vibe Code Web sessions nest under the matching local project or their
-        # own cloud project and open read-only with a link to the web app.
+        # own cloud project, and open with their open questions, a reply box and Stop.
         await page.set_viewport_size({"width": 1440, "height": 900})
         await page.goto(base)
         await page.get_by_role("button", name="Code", exact=True).click()
@@ -824,7 +850,27 @@ window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) 
         await expect(page.get_by_role("button", name="Thought for 2s", exact=True)).to_be_visible()
         await expect(page.get_by_role("link", name="Open on chat.mistral.ai", exact=True)).to_have_attribute("href", "https://chat.mistral.ai/code/p-cloud/s-cloud")
         await expect(page.locator("[data-vd-composer]")).to_have_count(0)
+        await page.get_by_role("radio", name="Dark", exact=True).check()
         await page.screenshot(path=str(artifacts / "cloud-session.png"))
+        await page.get_by_role("button", name="Submit answers", exact=True).click()
+        await expect(page.get_by_text("Vibe needs your input", exact=True)).to_have_count(0)
+        assert cloud_writes[-1] == {"procedure": "sessions.respondCallback", "params": {"sessionId": "s-cloud", "callbackId": "cb-theme",
+            "result": {"canceled": False, "answers": [{"question": "Which theme?", "answer": "Dark", "selected": ["Dark"]}]}}}, cloud_writes
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_have_count(0)
+        reply = page.get_by_role("textbox", name="Reply to this cloud session", exact=True)
+        await reply.fill("Add a light theme too")
+        await reply.press("Enter")
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_be_visible()
+        sent = cloud_writes[-1]
+        assert sent["procedure"] == "sessions.sendMessage" and sent["params"]["text"] == "Add a light theme too", sent
+        assert len(sent["params"]["idempotencyKey"]) == 36, sent
+        await expect(page.get_by_text("Add a light theme too", exact=True)).to_have_count(1)
+        await page.screenshot(path=str(artifacts / "cloud-session-running.png"))
+        await page.get_by_role("button", name="Stop", exact=True).click()
+        await expect(page.get_by_text("Vibe is working in the cloud…", exact=True)).to_have_count(0)
+        assert cloud_writes[-1] == {"procedure": "sessions.interrupt", "params": {"sessionId": "s-cloud"}}, cloud_writes
+        await expect(page.get_by_text("Cloud follow-up", exact=True)).to_be_visible()
+        await expect(page.get_by_role("button", name="Send", exact=True)).to_be_disabled()
         await cloud_project.click()
         await expect(cloud_project).to_have_attribute("aria-expanded", "false")
         await cloud_project.click()
@@ -872,7 +918,7 @@ window.vibedeck = { platform: "linux", cloud: { read: async (procedure, params) 
         assert not external, external
         await browser.close()
     server.shutdown()
-    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, cloud sessions and sign-in, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
+    print("PASS: Vibe dropdown/keyboard, Context tree and projects, hosted workspace routes, configured connectors, shared library creation, Work thinking defaults, Extensions/copy/compact layout, first-run browser prompt, usage refresh, history/callbacks/CLI handoff, cloud sessions, replies, answers, stop and sign-in, session switching, Studio, provider/settings error recovery, reduced motion, sidebar animation; no external requests")
 
 
 if __name__ == "__main__":

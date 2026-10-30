@@ -340,7 +340,7 @@ export function ApprovalCard({
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 {choices.map(choice => <button key={choice} disabled={busy !== null} onClick={() => void act(choice)}
                   className={cn("h-8 px-3 rounded-md text-sm font-medium transition-colors duration-75 ease-out disabled:opacity-50", choice === "approve" ? "vd-send" : "border border-border text-text hover:bg-surface-muted")}>
-                  {busy === choice ? "Sending…" : ({ approve: "Approve", approve_for_session: "Approve for session", approve_permanently: "Always approve", deny: "Deny", cancel_turn: "Cancel turn" } as Record<string, string>)[choice] || choice}
+                  {busy === choice ? "Sending…" : d?.labels?.[choice] || ({ approve: "Approve", approve_for_session: "Approve for session", approve_permanently: "Always approve", deny: "Deny", cancel_turn: "Cancel turn" } as Record<string, string>)[choice] || choice}
                 </button>)}
               </div>
             )}

@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts, CloudRaw, CloudError, CloudWebProject, CloudSession, HistoryEntry,
+  StudioCosts, CloudRaw, CloudError, CloudWebProject, CloudSession, CloudSessionState, HistoryEntry,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -310,5 +310,9 @@ export const parseCloudProjects = (raw: CloudRaw) =>
   http<CloudResult<{ projects: CloudWebProject[]; nextCursor: string | null }>>("/api/cloud/projects", { method: "POST", body: JSON.stringify(raw) });
 export const parseCloudSessions = (projectId: string, raw: CloudRaw) =>
   http<CloudResult<{ sessions: CloudSession[]; nextCursor: string | null }>>("/api/cloud/sessions", { method: "POST", body: JSON.stringify({ ...raw, projectId }) });
+export const parseCloudSessionState = (raw: CloudRaw) =>
+  http<CloudResult<{ session: CloudSessionState }>>("/api/cloud/session", { method: "POST", body: JSON.stringify(raw) });
+export const parseCloudResult = (raw: CloudRaw) =>
+  http<CloudResult<{ ok: true }>>("/api/cloud/result", { method: "POST", body: JSON.stringify(raw) });
 export const parseCloudMessages = (sessionId: string, raw: CloudRaw) =>
   http<CloudResult<{ entries: HistoryEntry[]; nextCursor: string | null }>>("/api/cloud/messages", { method: "POST", body: JSON.stringify({ ...raw, sessionId }) });

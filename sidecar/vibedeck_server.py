@@ -1908,8 +1908,8 @@ async def cloud_teleport_cancel(sid: str, op_id: str) -> dict:
     return op.view()
 
 
-# ---- Vibe Code Web sessions (read-only). The desktop shell reads the raw
-# tRPC responses with the web sign-in; the sidecar parses them.
+# ---- Vibe Code Web sessions. The desktop shell reads and writes them with
+# the web sign-in and hands over the raw tRPC responses; the sidecar parses them.
 
 class CloudPayload(BaseModel):
     status: int = Field(..., ge=0, le=599)
@@ -1956,6 +1956,22 @@ async def cloud_sessions_list(r: CloudSessionsReq) -> dict:
     except cloud_sessions.CloudError as e:
         return _cloud_error(e)
     return {"sessions": sessions, "nextCursor": cursor}
+
+
+@app.post("/api/cloud/session")
+async def cloud_session_state(r: CloudPayload) -> dict:
+    try:
+        return {"session": cloud_sessions.parse_session(cloud_sessions.unwrap(r.status, r.text))}
+    except cloud_sessions.CloudError as e:
+        return _cloud_error(e)
+
+
+@app.post("/api/cloud/result")
+async def cloud_write_result(r: CloudPayload) -> dict:
+    try:
+        return cloud_sessions.parse_result(cloud_sessions.unwrap(r.status, r.text))
+    except cloud_sessions.CloudError as e:
+        return _cloud_error(e)
 
 
 @app.post("/api/cloud/messages")

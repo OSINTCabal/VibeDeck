@@ -193,6 +193,7 @@ handle("workspace:close", () => workspace.close());
 handle("workspace:signin", (destination = "work") => connectAccount(destination));
 handle("workspace:connectors", () => connectAccount("connectors"));
 handle("cloud:read", (procedure, params) => workspace.readCode(procedure, params));
+handle("cloud:write", (procedure, params) => workspace.writeCode(procedure, params));
 
 handle("window:get-zoom", () => zoomFactor);
 handle("window:set-zoom", async factor => {

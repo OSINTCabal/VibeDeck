@@ -333,3 +333,33 @@ test('Vibe Code reader reports a sign-in redirect, a failed fetch and an unreach
   offline.hooks.script = async () => ({ status: 'ok' });
   assert.deepEqual(await offline.controller.readCode('projects.list'), { status: 0, text: '' }, 'malformed page replies are rejected');
 });
+test('Vibe Code writes rebuild only send, stop and callback inputs from checked fields', () => {
+  const { codeWriteRequest } = harness();
+  const input = request => JSON.parse(request.body)[0].json;
+  const key = '8a78b1e8-4c54-464b-bf58-78235872d9bc';
+  const send = codeWriteRequest('sessions.sendMessage', { sessionId: 's1', text: 'Привіт', idempotencyKey: key, content: [{ type: 'resource_id' }] });
+  assert.equal(send.path, '/api/code-trpc/sessions.sendMessage?batch=1');
+  assert.deepEqual(input(send), { sessionId: 's1', idempotencyKey: key, content: [{ type: 'text', text: 'Привіт' }] });
+  assert.match(input(codeWriteRequest('sessions.interrupt', { sessionId: 's1' })).idempotencyKey, /^[0-9a-f-]{36}$/);
+  const answers = { canceled: false, answers: [{ question: 'Q?', answer: 'Dark', selected: ['Dark'] }] };
+  assert.deepEqual(input(codeWriteRequest('sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: answers })).result, answers);
+  assert.deepEqual(input(codeWriteRequest('sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: { confirmed: false, reason: 'no' } })).result, { confirmed: false, reason: 'no' });
+  assert.deepEqual(input(codeWriteRequest('sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: { optionId: 'allow_once' } })).result, { optionId: 'allow_once' });
+  for (const [procedure, params] of [
+    ['sessions.delete', { sessionId: 's1' }], ['sessions.create', {}], ['hasOwnProperty', {}],
+    ['sessions.sendMessage', { sessionId: 's1', text: '   ' }], ['sessions.sendMessage', { sessionId: 's1', text: 'x', idempotencyKey: 'nope' }],
+    ['sessions.sendMessage', { sessionId: '../s', text: 'x' }],
+    ['sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: { confirmed: true, extra: 1 } }],
+    ['sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: { connectedConnectorIds: [], deniedConnectorIds: [] } }],
+    ['sessions.respondCallback', { sessionId: 's1', callbackId: 'cb', result: { canceled: false, answers: [{ question: 'Q' }] } }],
+  ]) assert.throws(() => codeWriteRequest(procedure, params), undefined, procedure);
+});
+test('Vibe Code writes post through the signed-in page', async () => {
+  const h = harness();
+  const scripts = [];
+  h.hooks.script = async code => { scripts.push(code); return { status: 200, text: '[{"result":{"data":{"json":{}}}}]' }; };
+  assert.equal((await h.controller.writeCode('sessions.interrupt', { sessionId: 's1' })).status, 200);
+  assert.match(scripts[0], /method: 'POST'/);
+  assert.match(scripts[0], /sessions\.interrupt\?batch=1/);
+  await assert.rejects(h.controller.writeCode('sessions.setArchived', { sessionId: 's1' }), /Unknown Vibe Code write/);
+});

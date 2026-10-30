@@ -31,10 +31,12 @@ interface VibedeckBridge {
     signIn: (destination?: "work" | "admin") => Promise<boolean>;
     onState: (callback: (state: { status: string; detail: string; section?: string }) => void) => () => void;
   };
-  /** Read-only Vibe Code Web queries through the signed-in workspace. */
+  /** Vibe Code Web queries and session replies through the signed-in workspace. */
   cloud?: {
-    read: (procedure: "projects.list" | "sessions.list" | "sessions.messages",
+    read: (procedure: "projects.list" | "sessions.list" | "sessions.messages" | "sessions.byId",
       params?: { projectId?: string; sessionId?: string; cursor?: string }) => Promise<import("./types").CloudRaw>;
+    write: (procedure: "sessions.sendMessage" | "sessions.interrupt" | "sessions.respondCallback",
+      params: { sessionId: string; text?: string; idempotencyKey?: string; callbackId?: string; result?: unknown }) => Promise<import("./types").CloudRaw>;
   };
   usage?: {
     account: () => Promise<{ remembered: boolean }>;

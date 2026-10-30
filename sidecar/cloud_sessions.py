@@ -1,11 +1,11 @@
-"""Vibe Code Web ("cloud") sessions, read-only.
+"""Vibe Code Web ("cloud") sessions.
 
-Mistral serves the session list and transcripts only to the signed-in web app
-(``/api/code-trpc/*`` behind Cloudflare), so the Electron shell reads them
-from a page in the workspace partition and hands the raw tRPC responses to
-the sidecar. This module turns those responses into VibeDeck's shapes:
-cloud projects matched to local repositories, session rows, and history
-entries the conversation view already renders.
+Mistral serves sessions only to the signed-in web app (``/api/code-trpc/*``
+behind Cloudflare), so the Electron shell reads and writes them from a page
+in the workspace partition and hands the raw tRPC responses to the sidecar.
+This module turns those responses into VibeDeck's shapes: cloud projects
+matched to local repositories, session rows and live state, and history
+entries the conversation view already renders, open questions included.
 """
 from __future__ import annotations
 
@@ -49,6 +49,10 @@ def unwrap(status: int, text: str) -> Any:
             raise CloudError("signed_out", "Sign in to Mistral to see your Vibe Code Web sessions.")
         if code == "NOT_FOUND" or http == 404:
             raise CloudError("not_found", "This cloud session no longer exists.")
+        if code in ("BAD_REQUEST", "CONFLICT", "PRECONDITION_FAILED", "UNPROCESSABLE_CONTENT", "TOO_MANY_REQUESTS"):
+            message = ((error or {}).get("json") or {}).get("message") if isinstance(error, dict) else None
+            useful = isinstance(message, str) and message and message != "Bad request"
+            raise CloudError("rejected", f"Vibe Code Web declined the request: {message}" if useful else "Vibe Code Web declined the request.")
         raise CloudError("unavailable", f"Vibe Code Web returned HTTP {http}.")
     data = (item.get("result") or {}).get("data")
     if not isinstance(data, dict):
@@ -175,6 +179,21 @@ def parse_sessions(data: Any, project_id: str) -> tuple[list[dict], Optional[str
     return sessions, cursor if isinstance(cursor, str) and cursor else None
 
 
+def parse_session(data: Any) -> dict:
+    """Live state from ``sessions.byId``: whether a turn runs and what it waits for."""
+    if not isinstance(data, dict) or not isinstance(data.get("id"), str):
+        raise CloudError("unavailable", "Vibe Code Web returned an unexpected session.")
+    status = data.get("status") if isinstance(data.get("status"), str) else "unknown"
+    wait = data.get("waitKind") if data.get("waitKind") in ("question", "approval", "idle") else None
+    title = data.get("title") if isinstance(data.get("title"), str) and data["title"].strip() else None
+    return {"id": data["id"], "status": status, "waitKind": wait, "title": title, "active": status == "active"}
+
+
+def parse_result(data: Any) -> dict:
+    """A write went through; its payload is not needed."""
+    return {"ok": True}
+
+
 # ---- transcript
 
 def _clip(text: str) -> str:
@@ -240,9 +259,44 @@ def _tool_entry(chunk: dict, base: dict, at: float) -> dict:
             "createdAt": _ms(chunk.get("startTime"), at), "updatedAt": _ms(chunk.get("endTime"), _ms(chunk.get("startTime"), at))}
 
 
+def _pending_callback(chunk: dict, base: dict, at: float) -> Optional[dict]:
+    """An open question, confirmation or permission request, shaped for the answer cards."""
+    name, data = chunk.get("callbackName"), chunk.get("input") if isinstance(chunk.get("input"), dict) else {}
+    callback_id = chunk.get("callbackId")
+    if not isinstance(callback_id, str) or not callback_id:
+        return None
+    entry = {**base, "type": "callback", "callbackId": callback_id, "state": {"status": "open"},
+             "createdAt": at, "updatedAt": at}
+    if name == "ask_user_question":
+        questions = [{"question": q["question"], "hideOther": False,
+                      "options": [{"label": o} for o in q.get("options") or [] if isinstance(o, str)]}
+                     for q in data.get("questions") or [] if isinstance(q, dict) and isinstance(q.get("question"), str)]
+        return {**entry, "title": "Question", "detail": {"kind": "user_input", "cloudCallback": name, "request": {"questions": questions}}}
+    if name == "ask_user_confirmation":
+        task = data.get("taskName") if isinstance(data.get("taskName"), str) else "Action"
+        reason = data.get("confirmationReason") if isinstance(data.get("confirmationReason"), str) else None
+        return {**entry, "title": task, "detail": {"kind": "approval", "cloudCallback": name, "choices": ["approve", "deny"], "reason": reason}}
+    if name == "ask_user_permission":
+        options = [o for o in data.get("options") or [] if isinstance(o, dict)]
+        ids = [o.get("id") or o.get("optionId") for o in options]
+        labels = {i: (o.get("label") or o.get("title") or i) for i, o in zip(ids, options) if isinstance(i, str)}
+        if not labels:
+            return None
+        effect = data.get("effect")
+        title = (effect.get("summary") or effect.get("title") or effect.get("name")) if isinstance(effect, dict) else effect
+        return {**entry, "title": title if isinstance(title, str) and title else "Permission requested",
+                "detail": {"kind": "approval", "cloudCallback": name, "choices": list(labels), "labels": labels,
+                           "reason": data.get("reason") if isinstance(data.get("reason"), str) else None}}
+    return None
+
+
 def _callback_text(chunk: dict) -> str:
     data = chunk.get("input") if isinstance(chunk.get("input"), dict) else {}
     lines = []
+    if chunk.get("callbackName") == "ask_user_confirmation" and isinstance(data.get("taskName"), str):
+        lines.append(f"**Approval:** {data['taskName']}")
+    if chunk.get("callbackName") == "ask_enable_connector":
+        lines.append("**Connector requested.** Enable it on chat.mistral.ai to continue.")
     for q in data.get("questions") or []:
         if isinstance(q, dict) and isinstance(q.get("question"), str):
             lines.append(f"**{q['question']}**")
@@ -250,6 +304,10 @@ def _callback_text(chunk: dict) -> str:
     answer = (chunk.get("result") or {}).get("value") if isinstance(chunk.get("result"), dict) else None
     if isinstance(answer, list) and answer:
         lines.append("\nAnswer: " + ", ".join(str(a) for a in answer))
+    elif isinstance(answer, dict) and isinstance(answer.get("confirmation"), str):
+        lines.append(f"Answer: {answer['confirmation']}")
+    elif isinstance(answer, dict) and isinstance(answer.get("optionId"), str):
+        lines.append(f"Answer: {answer['optionId']}")
     return "\n".join(lines)
 
 
@@ -286,7 +344,9 @@ def parse_messages(data: Any, session_id: str) -> tuple[list[dict], Optional[str
             if kind == "text" and context.get("type") == "reasoning":
                 flush()
                 if isinstance(chunk.get("text"), str) and chunk["text"].strip():
+                    streaming = message.get("status") not in (None, "complete", "completed") and not context.get("endTime")
                     entries.append({**base(index), "type": "reasoning", "text": _clip(chunk["text"]),
+                                    "generationStatus": "in_progress" if streaming else "completed",
                                     "createdAt": _ms(context.get("startTime"), at),
                                     "updatedAt": _ms(context.get("endTime"), _ms(context.get("startTime"), at))})
             elif kind == "text":
@@ -299,6 +359,11 @@ def parse_messages(data: Any, session_id: str) -> tuple[list[dict], Optional[str
                 entries.append(_tool_entry(chunk, base(index), at))
             elif kind == "task_callback":
                 flush()
+                result = chunk.get("result") if isinstance(chunk.get("result"), dict) else {}
+                pending = _pending_callback(chunk, base(index), at) if result.get("status") == "pending" else None
+                if pending:
+                    entries.append(pending)
+                    continue
                 text = _callback_text(chunk)
                 if text:
                     entries.append({**base(index), "type": "message", "role": "assistant",

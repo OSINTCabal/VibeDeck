@@ -1,4 +1,5 @@
 const { WebContentsView, session, dialog, shell, nativeTheme } = require('electron');
+const crypto = require('node:crypto');
 const { lookup } = require('node:dns/promises');
 const { BlockList, isIP } = require('node:net');
 const browser = require('./usage-browser');
@@ -35,7 +36,51 @@ const CODE_READS = Object.freeze({
   'projects.list': () => ({ direction: 'forward' }),
   'sessions.list': params => ({ projectId: codeId(params.projectId), includePinned: true, direction: 'forward' }),
   'sessions.messages': params => ({ sessionId: codeId(params.sessionId), direction: 'forward' }),
+  'sessions.byId': params => ({ id: codeId(params.sessionId) }),
 });
+// Writes the desktop may send to continue a session. Inputs are rebuilt here
+// from checked fields, so a renderer cannot reach any other mutation.
+const CODE_WRITES = Object.freeze({
+  'sessions.sendMessage': params => ({ sessionId: codeId(params.sessionId), idempotencyKey: codeKey(params.idempotencyKey),
+    content: [{ type: 'text', text: codeText(params.text, 100000) }] }),
+  'sessions.interrupt': params => ({ sessionId: codeId(params.sessionId), idempotencyKey: codeKey(params.idempotencyKey) }),
+  'sessions.respondCallback': params => ({ sessionId: codeId(params.sessionId), callbackId: codeText(params.callbackId, 200),
+    result: codeCallbackResult(params.result) }),
+});
+function codeKey(value) {
+  if (value == null) return crypto.randomUUID();
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error('Invalid Vibe Code idempotency key');
+  return value;
+}
+function codeText(value, max) {
+  if (typeof value !== 'string' || !value.trim() || value.length > max) throw new Error('Invalid Vibe Code text');
+  return value;
+}
+/** Answers to a question, a confirmation, or a permission option; nothing else. */
+function codeCallbackResult(result) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Invalid Vibe Code callback result');
+  const keys = Object.keys(result).sort().join(',');
+  if (keys === 'answers,canceled' && typeof result.canceled === 'boolean' && Array.isArray(result.answers) && result.answers.length <= 20) {
+    return { canceled: result.canceled, answers: result.answers.map(answer => {
+      if (!answer || typeof answer.question !== 'string' || typeof answer.answer !== 'string' || answer.answer.length > 10000) throw new Error('Invalid Vibe Code answer');
+      const item = { question: answer.question, answer: answer.answer };
+      if (answer.selected !== undefined) {
+        if (!Array.isArray(answer.selected) || !answer.selected.every(v => typeof v === 'string')) throw new Error('Invalid Vibe Code answer');
+        item.selected = answer.selected;
+      }
+      return item;
+    }) };
+  }
+  if ((keys === 'confirmed' || keys === 'confirmed,reason') && typeof result.confirmed === 'boolean'
+    && (result.reason === undefined || typeof result.reason === 'string')) return { ...result };
+  if (keys === 'optionId' && typeof result.optionId === 'string' && result.optionId) return { optionId: result.optionId };
+  throw new Error('Invalid Vibe Code callback result');
+}
+function codeWriteRequest(procedure, params) {
+  if (!Object.hasOwn(CODE_WRITES, procedure)) throw new Error('Unknown Vibe Code write');
+  const input = CODE_WRITES[procedure](params && typeof params === 'object' ? params : {});
+  return { path: `/api/code-trpc/${procedure}?batch=1`, body: JSON.stringify({ 0: { json: input } }) };
+}
 function codeId(value) {
   if (typeof value !== 'string' || !/^[\w-]{1,100}$/.test(value)) throw new Error('Invalid Vibe Code id');
   return value;
@@ -309,8 +354,10 @@ function createWorkspace(getWindow) {
     })();
     return current.ready;
   }
-  async function readCode(procedure, params) {
-    const path = codeReadPath(procedure, params);
+  const readCode = async (procedure, params) => runCode({ path: codeReadPath(procedure, params) });
+  const writeCode = async (procedure, params) => runCode(codeWriteRequest(procedure, params));
+  async function runCode({ path, body }) {
+    const init = body === undefined ? '' : `, method: 'POST', headers: { 'content-type': 'application/json' }, body: ${JSON.stringify(body)}`;
     let contents;
     try { contents = await readerPage(); } catch { closeReader(); return { status: 0, text: '' }; }
     let origin = null;
@@ -321,7 +368,7 @@ function createWorkspace(getWindow) {
       const result = await contents.executeJavaScript(`(async () => {
         if (location.origin !== ${JSON.stringify(ORIGIN)}) return { status: 401, text: '' };
         try {
-          const response = await fetch(${JSON.stringify(path)}, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(20000) });
+          const response = await fetch(${JSON.stringify(path)}, { credentials: 'include', cache: 'no-store', redirect: 'manual', signal: AbortSignal.timeout(20000)${init} });
           if (response.type === 'opaqueredirect') return { status: 401, text: '' };
           const text = await response.text();
           return { status: response.status, text: text.length > 16 * 1024 * 1024 ? '' : text };
@@ -332,7 +379,7 @@ function createWorkspace(getWindow) {
       return { status: result.status, text: result.text };
     } catch { closeReader(); return { status: 0, text: '' }; }
   }
-  return { open, close, readCode,
+  return { open, close, readCode, writeCode,
     resize: rectangle => { lastRectangle = rectangle; if (view) view.setBounds(bounds(rectangle, getWindow().getContentSize(), getWindow().webContents.getZoomFactor())); },
     setZoom: factor => { if (view) view.webContents.setZoomFactor(factor); },
     refresh: () => view ? open(section, lastRectangle, lastTheme, AUTH.has(new URL(view.webContents.getURL()).origin) ? undefined : view.webContents.getURL()) : Promise.resolve(),
@@ -354,4 +401,4 @@ function createWorkspace(getWindow) {
     },
   };
 }
-module.exports = { createWorkspace, publicRequest, cookieDetails, bounds, codeReadPath, ROUTES };
+module.exports = { createWorkspace, publicRequest, cookieDetails, bounds, codeReadPath, codeWriteRequest, ROUTES };

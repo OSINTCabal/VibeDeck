@@ -1,6 +1,6 @@
 import * as React from "react";
-import { parseCloudMessages, parseCloudProjects, parseCloudSessions } from "./api";
-import type { CloudError, CloudErrorCode, CloudWebProject, CloudSession, HistoryEntry } from "./types";
+import { parseCloudMessages, parseCloudProjects, parseCloudResult, parseCloudSessionState, parseCloudSessions } from "./api";
+import type { CloudError, CloudErrorCode, CloudWebProject, CloudSession, CloudSessionState, HistoryEntry } from "./types";
 
 /**
  * Vibe Code Web sessions. The desktop shell reads them with the Mistral web
@@ -94,6 +94,48 @@ export async function loadCloudMessages(sessionId: string): Promise<HistoryEntry
     throw failure(error);
   }
 }
+
+export async function loadCloudState(sessionId: string): Promise<CloudSessionState> {
+  const bridge = window.vibedeck?.cloud;
+  if (!bridge) throw new CloudFailure("unavailable", "Cloud sessions open in the VibeDeck desktop app.");
+  let result;
+  try { result = await parseCloudSessionState(await bridge.read("sessions.byId", { sessionId })); } catch (error) { throw failure(error); }
+  if (result.error) throw new CloudFailure(result.error.code, result.error.message);
+  return result.session;
+}
+
+type CloudWrite = Parameters<NonNullable<NonNullable<Window["vibedeck"]>["cloud"]>["write"]>;
+
+async function write(procedure: CloudWrite[0], params: CloudWrite[1]): Promise<void> {
+  const bridge = window.vibedeck?.cloud;
+  if (!bridge?.write) throw new CloudFailure("unavailable", "Continuing cloud sessions needs the VibeDeck desktop app.");
+  let result;
+  try { result = await parseCloudResult(await bridge.write(procedure, params)); } catch (error) { throw failure(error); }
+  if (result.error) throw new CloudFailure(result.error.code, result.error.message);
+}
+
+/** Send a prompt; reuse `idempotencyKey` when retrying so it is delivered once. */
+export const sendCloudMessage = (sessionId: string, text: string, idempotencyKey: string) =>
+  write("sessions.sendMessage", { sessionId, text, idempotencyKey });
+export const interruptCloud = (sessionId: string) => write("sessions.interrupt", { sessionId });
+
+/** Turn an answer card's decision into the result the cloud callback expects. */
+export function cloudCallbackResult(entry: HistoryEntry, decision: string, userInput?: unknown): unknown {
+  const kind = entry.detail?.cloudCallback;
+  if (kind === "ask_user_question") {
+    const input = (userInput || {}) as { cancelled?: boolean; answers?: { question: string; answer: string }[] };
+    const questions: { question: string; options?: { label: string }[] }[] = entry.detail?.request?.questions || [];
+    return { canceled: !!input.cancelled, answers: (input.answers || []).map(({ question, answer }) => {
+      const options = questions.find(q => q.question === question)?.options?.map(o => o.label) || [];
+      return options.includes(answer) ? { question, answer, selected: [answer] } : { question, answer };
+    }) };
+  }
+  if (kind === "ask_user_confirmation") return { confirmed: decision === "approve" };
+  if (kind === "ask_user_permission") return { optionId: decision };
+  throw new CloudFailure("unavailable", "Answer this request on chat.mistral.ai.");
+}
+export const respondCloudCallback = (sessionId: string, callbackId: string, result: unknown) =>
+  write("sessions.respondCallback", { sessionId, callbackId, result });
 
 /** The shared cloud list; refreshes on mount, on focus and every few minutes while visible. */
 export function useCloud(): CloudState {

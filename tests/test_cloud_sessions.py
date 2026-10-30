@@ -197,3 +197,59 @@ def test_endpoints_parse_and_report_errors(monkeypatch):
         assert r.json() == {"error": {"code": "signed_out", "message": "Sign in to Mistral to see your Vibe Code Web sessions."}}
         assert client.post("/api/cloud/messages", json={"status": 0, "text": "", "sessionId": S}).json()["error"]["code"] == "offline"
         assert client.post("/api/cloud/messages", json={"status": 200, "text": "{}"}).status_code == 422
+
+
+def test_session_state_and_write_results():
+    state = cloud_sessions.parse_session(cloud_sessions.unwrap(200, batch(
+        {"id": S, "status": "active", "waitKind": None, "title": "Оновлення інтерфейсу"})))
+    assert state == {"id": S, "status": "active", "waitKind": None, "title": "Оновлення інтерфейсу", "active": True}
+    blocked = cloud_sessions.parse_session({"id": S, "status": "blocked", "waitKind": "question", "title": " "})
+    assert blocked["active"] is False and blocked["waitKind"] == "question" and blocked["title"] is None
+    with pytest.raises(CloudError):
+        cloud_sessions.parse_session({"status": "active"})
+    assert cloud_sessions.parse_result(cloud_sessions.unwrap(200, batch(None))) == {"ok": True}
+    busy = json.dumps([{"error": {"json": {"message": "Session already has an active turn", "code": -32009,
+                                           "data": {"code": "CONFLICT", "httpStatus": 409}}}}])
+    with pytest.raises(CloudError) as raised:
+        cloud_sessions.unwrap(409, busy)
+    assert raised.value.code == "rejected" and raised.value.message.endswith("Session already has an active turn")
+    with pytest.raises(CloudError) as raised:
+        cloud_sessions.unwrap(400, trpc_error("BAD_REQUEST", 400).replace('"Bad_Request"', '"Bad request"'))
+    assert raised.value.code == "rejected"
+
+
+def test_pending_callbacks_become_answer_cards():
+    def callback(name, data, status="pending"):
+        return {"type": "task_callback", "callbackId": "cb-" + name, "callbackName": name, "input": data,
+                "result": {"status": status} if status != "submitted" else {"status": status, "value": {"confirmation": "allow"}}}
+    chunks = [
+        callback("ask_user_question", {"questions": [{"question": "Which theme?", "options": ["Dark", "Light"]}]}),
+        callback("ask_user_confirmation", {"taskName": "push_branch", "taskInput": {}, "taskCallId": "t", "confirmationReason": "Pushes to GitHub"}),
+        callback("ask_user_permission", {"effect": {"summary": "rm -rf build"}, "options": [{"id": "allow_once", "label": "Allow once"}, {"id": "deny", "label": "Deny"}]}),
+        callback("ask_enable_connector", {"connectorIds": ["github"]}),
+        callback("ask_user_confirmation", {"taskName": "deploy"}, status="submitted"),
+        {"type": "task_callback", "callbackName": "ask_user_question", "input": {}, "result": {"status": "pending"}},
+    ]
+    entries, _ = cloud_sessions.parse_messages({"messages": [
+        {"id": "m", "role": "assistant", "turn": 0, "status": "generating", "contentChunks": [
+            {"type": "text", "text": "Hmm", "_context": {"type": "reasoning", "startTime": 5}}, *chunks]}]}, S)
+    reasoning, question, confirm, permission, connector, answered = entries
+    assert reasoning["generationStatus"] == "in_progress"
+    assert question["type"] == "callback" and question["callbackId"] == "cb-ask_user_question"
+    assert question["state"] == {"status": "open"} and question["detail"]["kind"] == "user_input"
+    assert question["detail"]["request"]["questions"] == [{"question": "Which theme?", "hideOther": False,
+                                                           "options": [{"label": "Dark"}, {"label": "Light"}]}]
+    assert confirm["detail"] == {"kind": "approval", "cloudCallback": "ask_user_confirmation", "choices": ["approve", "deny"], "reason": "Pushes to GitHub"}
+    assert confirm["title"] == "push_branch"
+    assert permission["title"] == "rm -rf build" and permission["detail"]["choices"] == ["allow_once", "deny"]
+    assert permission["detail"]["labels"] == {"allow_once": "Allow once", "deny": "Deny"}
+    assert connector["type"] == "message" and "Enable it on chat.mistral.ai" in connector["content"][0]["text"]
+    assert answered["type"] == "message" and "**Approval:** deploy" in answered["content"][0]["text"] and "Answer: allow" in answered["content"][0]["text"]
+
+
+def test_session_and_result_endpoints():
+    with TestClient(vibedeck_server.app, base_url="http://127.0.0.1:9377") as client:
+        r = client.post("/api/cloud/session", json={"status": 200, "text": batch({"id": S, "status": "active"})})
+        assert r.json()["session"]["active"] is True
+        assert client.post("/api/cloud/result", json={"status": 200, "text": batch({})}).json() == {"ok": True}
+        assert client.post("/api/cloud/result", json={"status": 0, "text": ""}).json()["error"]["code"] == "offline"
