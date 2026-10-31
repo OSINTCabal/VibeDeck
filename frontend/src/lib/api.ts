@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts,
+  StudioCosts, VibeReleaseNotes, TurnQueue,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -32,6 +32,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------- health/config
 
 export const getHealth = () => http<Health>("/api/health");
+export const getVibeReleaseNotes = () => http<VibeReleaseNotes>("/api/vibe/release-notes");
 export const getConfig = () => http<AppConfig>("/api/config");
 export const patchConfig = (body: Partial<AppConfig>) =>
   http<AppConfig>("/api/config", { method: "PATCH", body: JSON.stringify(body) });
@@ -119,7 +120,14 @@ export const getMcp = (sid?: string) =>
 export const getAgents = () => http<{ agents: AgentInfo[]; dir: string }>("/api/agents");
 export const getAudit = () => http<{ audit: { action: string; detail: string; ts: number }[] }>("/api/audit");
 export const getProjects = () =>
-  http<{ home: string; recent: { path: string; name: string; lastUsed: number }[]; known: { path: string; name: string }[] }>("/api/projects");
+  http<{ home: string; recent: { path: string; name: string; lastUsed: number; branch?: string | null }[];
+    known: { path: string; name: string }[]; repos?: { path: string; name: string; branch: string }[] }>("/api/projects");
+
+export interface GitBranches { root: string; current: string | null; branches: string[]; dirty: boolean | null }
+export const getGitBranches = (path: string) =>
+  http<GitBranches>(`/api/git/branches?path=${encodeURIComponent(path)}`);
+export const switchGitBranch = (path: string, branch: string, create = false) =>
+  http<GitBranches>("/api/git/switch", { method: "POST", body: JSON.stringify({ path, branch, create }) });
 
 export const getWorkspace = (kind: "connectors" | "libraries", signal?: AbortSignal) =>
   http<{ items: { id: string; name: string; description: string; connected?: boolean; documents?: number | null }[] }>(`/api/workspace/${kind}`, { signal });
@@ -264,3 +272,185 @@ export interface SubagentSettings {
 export const getSubagentSettings = () => http<SubagentSettings>("/api/agents/settings");
 export const saveSubagentSettings = (settings: SubagentSettings) =>
   http<SubagentSettings>("/api/agents/settings", {method:"PUT", body:JSON.stringify(settings)});
+
+// ---------------------------------------------------------------- Vibe Code Web (cloud teleport)
+
+export interface CloudProject { projectId: string; name: string; repositories: { repoUrl: string; defaultBranch?: string | null }[]; isReadOnly?: boolean }
+export interface CloudPickerView {
+  context: { repoRoot: string; repoUrl: string; repoName: string; savedLink?: { projectId: string; projectName: string } | null };
+  state: { projects: CloudProject[]; nextCursor?: string | null; repoUrl: string };
+  git: { remoteName: string; remoteUrl: string; repo: string; branch?: string | null; defaultBranch?: string | null };
+}
+export interface TeleportStatus {
+  operationId: string; status: string; url: string | null; error: string | null; done: boolean;
+  push: { unpushedCount: number; branchNotPushed: boolean } | null;
+  events: { kind: string; at: number }[];
+}
+const cloud = (sid: string, path: string, body?: unknown) =>
+  http<any>(`/api/sessions/${sid}/cloud${path}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
+export const cloudOpen = (sid: string, prompt?: string) =>
+  cloud(sid, "/open", { prompt: prompt || null }) as Promise<{ pickerId: string; view: CloudPickerView; resolvedProjectId?: string | null }>;
+export const cloudMore = (sid: string, pickerId: string) =>
+  cloud(sid, "/projects/more", { pickerId }) as Promise<{ view: CloudPickerView }>;
+export const cloudSelect = (sid: string, pickerId: string, projectId: string) =>
+  cloud(sid, "/projects/select", { pickerId, projectId }) as Promise<{ view: CloudPickerView; project: CloudProject }>;
+export const cloudCreate = (sid: string, pickerId: string, name: string, defaultBranch: string) =>
+  cloud(sid, "/projects/create", { pickerId, name, defaultBranch }) as Promise<{ view: CloudPickerView; project: CloudProject }>;
+export const cloudCancel = (sid: string, pickerId: string) => cloud(sid, "/cancel", { pickerId });
+export const cloudTeleport = (sid: string, pickerId: string, projectId: string, prompt?: string) =>
+  cloud(sid, "/teleport", { pickerId, projectId, prompt: prompt || null }) as Promise<TeleportStatus>;
+export const cloudTeleportStatus = (sid: string, op: string) => cloud(sid, `/teleport/${op}`) as Promise<TeleportStatus>;
+export const cloudTeleportPush = (sid: string, op: string, approved: boolean) =>
+  cloud(sid, `/teleport/${op}/push`, { approved }) as Promise<TeleportStatus>;
+export const cloudTeleportCancel = (sid: string, op: string) => cloud(sid, `/teleport/${op}/cancel`, {}) as Promise<TeleportStatus>;
+
+// ---------------------------------------------------------------- review and rewind
+
+export type ReviewOwner = { kind: "agent"; turnId: number } | { kind: "manual"; index: number };
+export type ReviewStatus = "modified" | "created" | "deleted" | "binary_or_undecodable";
+export interface ReviewRegion {
+  kind: "text" | "opaque"; versionIndex: number; ordinal: number; owner: ReviewOwner;
+  decision: "pending" | "keep" | "revert";
+}
+export interface ReviewState {
+  cwd: string;
+  files: { path: string; status: ReviewStatus; regions: ReviewRegion[] }[];
+  scopes: { owner: ReviewOwner; files: { path: string; status: ReviewStatus; regionCount: number }[] }[];
+}
+export type DiffRow =
+  | { t: "ctx"; old: number; new: number; text: string }
+  | { t: "del"; old: number; text: string }
+  | { t: "add"; new: number; text: string }
+  | { t: "skip"; count: number };
+export type RegionRef = { versionIndex: number; ordinal: number };
+export interface ReviewFileDiff {
+  path: string; status: ReviewStatus; rows: DiffRow[];
+  hunks: { side: "additions" | "deletions"; line: number; regions: RegionRef[]; row: number }[];
+  opaque?: boolean; tooLarge?: boolean;
+}
+export type ReviewTarget =
+  | { kind: "regions"; path: string; regions: RegionRef[] }
+  | { kind: "file"; path: string }
+  | { kind: "scope"; owner: ReviewOwner }
+  | { kind: "scopeFile"; owner: ReviewOwner; path: string }
+  | { kind: "all" };
+export const ownerKey = (o: ReviewOwner) => o.kind === "agent" ? `agent:${o.turnId}` : `manual:${o.index}`;
+
+export const getReview = (sid: string) => http<ReviewState>(`/api/sessions/${sid}/review`);
+export const getReviewFile = (sid: string, path: string, owner?: ReviewOwner) =>
+  http<ReviewFileDiff>(`/api/sessions/${sid}/review/file?${new URLSearchParams({ path, ...(owner ? { owner: ownerKey(owner) } : {}) })}`);
+export const decideReview = (sid: string, action: "approve" | "revert", target: ReviewTarget) =>
+  http<ReviewState>(`/api/sessions/${sid}/review/${action}`, { method: "POST", body: JSON.stringify({ target }) });
+export const previewRewind = (sid: string, entryId: string) =>
+  http<{ hasFileChanges: boolean; paths: string[] }>(`/api/sessions/${sid}/rewind/${encodeURIComponent(entryId)}`);
+export const rewindTo = (sid: string, entryId: string, restoreFiles: boolean) =>
+  http<{ message: string; restoredPaths: string[]; restoreErrors: string[] }>(
+    `/api/sessions/${sid}/rewind/${encodeURIComponent(entryId)}`, { method: "POST", body: JSON.stringify({ restoreFiles }) });
+
+// ---------------------------------------------------------------- turn queue and fork
+
+const queueBody = (text: string, images: unknown[], requestId?: string) =>
+  JSON.stringify({ text, images, ...(requestId ? { requestId } : {}) });
+export const enqueueTurn = (sid: string, text: string, images: unknown[] = [], requestId?: string) =>
+  http<{ queueItemId: string; waits: boolean }>(`/api/sessions/${sid}/queue`, { method: "POST", body: queueBody(text, images, requestId) });
+export const replaceQueued = (sid: string, itemId: string, text: string) =>
+  http<TurnQueue>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}`, { method: "PUT", body: queueBody(text, []) });
+export const removeQueued = (sid: string, itemId: string) =>
+  http<TurnQueue>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+export const steerQueued = (sid: string, itemId: string, expectedTurnId: string) =>
+  http<{ queueItemId: string; turnId: string }>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}/steer`,
+    { method: "POST", body: JSON.stringify({ expectedTurnId }) });
+export const resumeQueue = (sid: string) => http<TurnQueue>(`/api/sessions/${sid}/queue/resume`, { method: "POST" });
+export const forkSession = (sid: string, entryId?: string) =>
+  http<Session>(`/api/sessions/${sid}/fork`, { method: "POST", body: JSON.stringify(entryId ? { entryId } : {}) });
+
+// ---------------------------------------------------------------- worktrees and compaction
+
+export interface VibeWorktree {
+  name: string; branch: string; cwd: string; root: string; repoRoot: string;
+  branchChanges?: { additions: number; deletions: number } | null;
+}
+export interface WorktreeRemoval {
+  outcome: "removed" | "kept_dirty" | "kept_in_use" | "kept_unmanaged" | "kept_error" | "not_found";
+  reasons?: string[]; holders?: number | null; branch?: string | null; branchDeleted?: boolean;
+}
+export const getAllWorktrees = () => http<{ worktrees: VibeWorktree[]; repositories: string[] }>("/api/worktrees/all");
+export const removeWorktree = (cwd: string, force = false) =>
+  http<WorktreeRemoval>("/api/worktrees/remove", { method: "POST", body: JSON.stringify({ cwd, force }) });
+export const pruneWorktrees = () => http<{ removed: number }>("/api/worktrees/prune", { method: "POST" });
+export const setWorktreeLimit = (limit: number) =>
+  http<{ limit: number; failures: string[] }>("/api/worktrees/limit", { method: "PUT", body: JSON.stringify({ limit }) });
+export const compactSession = (sid: string, instructions = "") =>
+  http<{ summary: string }>(`/api/sessions/${sid}/compact`, { method: "POST", body: JSON.stringify({ instructions }) });
+
+// ---------------------------------------------------------------- subagents, background processes, shell
+
+export interface SubagentRun {
+  sessionId: string; name: string; agentType?: string | null;
+  status: "running" | "idle" | "interrupted" | "failed" | "closed" | "unknown";
+  model?: string | null; usage?: { totalTokens?: number } | null; costUsd?: number | null; steps?: number | null;
+}
+export interface BackgroundProcess {
+  processId: string; command: string; status: "running" | "completed" | "failed" | "stopped" | "orphaned";
+  exitCode?: number | null; createdAt: string;
+}
+export const getSubagents = (sid: string) => http<{ subagents: SubagentRun[] }>(`/api/sessions/${sid}/subagents`);
+export const interruptSubagents = (sid: string) =>
+  http<{ results: { name: string; outcome: string }[] }>(`/api/sessions/${sid}/subagents/interrupt`, { method: "POST", body: "{}" });
+export const getBackground = (sid: string) => http<{ processes: BackgroundProcess[] }>(`/api/sessions/${sid}/background`);
+export const getBackgroundOutput = (sid: string, processId: string) =>
+  http<{ available: boolean; text?: string; truncatedBefore?: boolean; isFinal?: boolean }>(
+    `/api/sessions/${sid}/background/${encodeURIComponent(processId)}/output`);
+export const stopBackground = (sid: string, processId: string) =>
+  http<{ status: string }>(`/api/sessions/${sid}/background/${encodeURIComponent(processId)}/stop`, { method: "POST" });
+export const runShell = (sid: string, command: string) =>
+  http<{ operationId: string }>(`/api/sessions/${sid}/shell`, { method: "POST", body: JSON.stringify({ command }) });
+export const interruptShell = (sid: string, operationId: string) =>
+  http<{ ok: boolean }>(`/api/sessions/${sid}/shell/${encodeURIComponent(operationId)}/interrupt`, { method: "POST" });
+
+// ---------------------------------------------------------------- MCP, connectors, skill registry
+
+export interface McpSource {
+  name: string; displayName: string; kind: "server" | "connector"; transport: string;
+  status: "connected" | "needs_auth" | "disabled" | "unavailable" | "connecting" | "failed" | string;
+  tools: { name: string; disabled?: boolean }[]; error?: string | null;
+}
+export interface McpState { sources: McpSource[]; manageConnectorsUrl?: string | null; connectorError?: string | null }
+const post = <T,>(path: string, body: unknown) => http<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const getMcpSources = () => http<McpState>("/api/extensions/mcp");
+export const refreshMcp = () => post<McpState>("/api/extensions/mcp/refresh", {});
+export const toggleMcp = (name: string, source: McpSource["kind"], disabled: boolean) =>
+  post<McpState>("/api/extensions/mcp/toggle", { name, source, disabled });
+export const addMcp = (body: { name?: string; transport: string; url?: string; command?: string; args?: string[] }) =>
+  post<McpState & { name: string; created: boolean }>("/api/extensions/mcp/add", body);
+export const removeMcp = (name: string) => post<McpState>("/api/extensions/mcp/remove", { name });
+export const loginMcp = (name: string, source: McpSource["kind"]) => post<{ url: string | null }>("/api/extensions/mcp/login", { name, source });
+export const logoutMcp = (name: string) => post<McpState>("/api/extensions/mcp/logout", { name });
+
+export interface SkillRegistry {
+  catalog: { name: string; skillId: string; description: string; latestVersion: number }[];
+  updates: Record<string, number>;
+  authenticated: boolean;
+  installed: { name: string; description: string; enabled: boolean; source?: string; version?: number | null; skillId?: string | null }[];
+}
+export const getSkillRegistry = () => http<SkillRegistry>("/api/extensions/skills");
+export const installSkill = (skillId: string) => post<SkillRegistry>("/api/extensions/skills/install", { skillId });
+export const updateSkill = (name: string) => post<SkillRegistry>("/api/extensions/skills/update", { name });
+export const setSkillEnabled = (name: string, enabled: boolean) => post<SkillRegistry>("/api/extensions/skills/enabled", { name, enabled });
+export const removeSkill = (name: string) => post<SkillRegistry>("/api/extensions/skills/remove", { name });
+
+// ---------------------------------------------------------------- loops and dictation
+
+export interface SessionLoop { id: string; prompt: string; intervalSeconds?: number | null; cron?: string | null; nextFireAt: number }
+export const getLoops = (sid: string) => http<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops`);
+export const createLoop = (sid: string, interval: string, prompt: string) => post<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops`, { interval, prompt });
+export const deleteLoop = (sid: string, loopId: string) =>
+  http<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops/${encodeURIComponent(loopId)}`, { method: "DELETE" });
+export const transcribe = async (audio: Blob, language = navigator.language) => {
+  const res = await fetch(BASE + `/api/voice/transcribe?language=${encodeURIComponent(language)}`, {
+    method: "POST", headers: { "Content-Type": audio.type || "audio/webm" }, body: audio,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `Dictation failed (${res.status})`);
+  return body as { text: string };
+};

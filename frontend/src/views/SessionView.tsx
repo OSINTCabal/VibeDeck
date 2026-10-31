@@ -21,7 +21,9 @@ export function SessionView() {
       .catch(e => { if (!closed) setError(String(e)); });
     // keep the header (title/model/agent) fresh — renames and picker changes
     const t = setInterval(() => {
-      if (!document.hidden) getSession(id).then(s => { if (!closed) setSession(s); }).catch(() => {});
+      if (!document.hidden) getSession(id).then(s => {
+        if (!closed) setSession(prev => prev && JSON.stringify(prev) === JSON.stringify(s) ? prev : s);
+      }).catch(() => {});
     }, 10000);
     return () => { closed = true; clearInterval(t); };
   }, [id]);

@@ -3,7 +3,7 @@ import * as React from "react";
 import { BarChart3, ChevronLeft, ChevronRight, ExternalLink, RefreshCw, LogIn, LogOut } from "lucide-react";
 import { getUsage } from "@/lib/api";
 import { Badge, Button, Card, CardBody, Spinner } from "@/components/ui";
-import { cn, formatTokens } from "@/lib/utils";
+import { cn, formatTokens, modelLabel } from "@/lib/utils";
 import type { BillingRow, UsageAllowance, UsageSnapshot } from "@/lib/types";
 import "@/lib/windowControls";
 
@@ -136,7 +136,7 @@ export function UsageView() {
               {connected && <Button size="sm" variant="ghost" onClick={() => void disconnect()} aria-label="Disconnect usage"><LogOut size={13} />Disconnect</Button>}
             </div> : <span className="text-xs text-text-muted">Open the Electron desktop app to connect subscription usage.</span>}
           </div>
-          {desktop && <p className="mt-3 text-xs text-text-muted">Choose Google or email on Mistral’s sign-in page in Chrome, then “I’ve signed in” in VibeDeck. Usage stays connected in the background and refreshes every minute while this page is visible. Mistral may take time to report new usage.</p>}
+          {desktop && <p className="mt-3 text-xs text-text-muted">Choose Google or email on Mistral’s sign-in page in the browser window, then “I’ve signed in” in VibeDeck. Usage stays connected in the background and refreshes every minute while this page is visible. Mistral may take time to report new usage.</p>}
           {web?.detail && <p className="mt-3 text-xs text-text-muted">{web.detail}</p>}
           {web?.measuredAt && <p className="mt-2 text-[11px] text-text-faint">Subscription checked {stamp(web.measuredAt)}{web.status === "stale" ? " · Stale data" : ""}</p>}
         </CardBody></Card>
@@ -166,7 +166,7 @@ export function UsageView() {
           {tab === "account" && billing && <p className="mb-4 text-xs text-text-faint">{billing.source === "admin" ? "Organization from your Admin API key" : "Organization from your Mistral web session"} · Updated {stamp(billing.measuredAt)}{billing.status !== "ready" ? ` · ${billing.status}` : ""}{billing.detail ? ` · ${billing.detail}` : ""}</p>}
           {tab === "local" && <p className="mb-4 text-xs text-text-faint">Observed increments while VibeDeck is connected, grouped by observation date in UTC. Earlier CLI activity is not reconstructed. Playground tokens are included; its spend is available through account billing.</p>}
           <Card className="mb-5"><CardBody><h2 className="mb-4 text-sm font-medium">Tokens over time</h2><UsageChart rows={chartRows} /></CardBody></Card>
-          <Card><CardBody><h2 className="mb-3 text-sm font-medium">By model</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-border text-xs text-text-faint"><th className="py-2 text-left font-normal">Model</th><th className="text-right font-normal">Input</th><th className="text-right font-normal">Output</th><th className="text-right font-normal">Cached</th></tr></thead><tbody>{[...models].map(([model, value]) => <tr key={model} className="border-b border-border/60 transition-colors hover:bg-surface/40"><td className="py-3 font-mono text-xs">{model}</td><td className="text-right">{formatTokens(value.input)}</td><td className="text-right">{formatTokens(value.output)}</td><td className="text-right">{formatTokens(value.cached)}</td></tr>)}{!models.size && <tr><td colSpan={4} className="py-7 text-center text-sm text-text-faint">No recorded activity in this month.</td></tr>}</tbody></table></div></CardBody></Card>
+          <Card><CardBody><h2 className="mb-3 text-sm font-medium">By model</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b border-border text-xs text-text-faint"><th className="py-2 text-left font-normal">Model</th><th className="text-right font-normal">Input</th><th className="text-right font-normal">Output</th><th className="text-right font-normal">Cached</th></tr></thead><tbody>{[...models].map(([model, value]) => <tr key={model} className="border-b border-border/60 transition-colors hover:bg-surface/40"><td className="py-3 text-xs" title={model}>{modelLabel(model)}</td><td className="text-right">{formatTokens(value.input)}</td><td className="text-right">{formatTokens(value.output)}</td><td className="text-right">{formatTokens(value.cached)}</td></tr>)}{!models.size && <tr><td colSpan={4} className="py-7 text-center text-sm text-text-faint">No recorded activity in this month.</td></tr>}</tbody></table></div></CardBody></Card>
         </>}
       </div>
     </div>

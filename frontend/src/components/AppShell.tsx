@@ -13,7 +13,15 @@ export function AppShell() {
   const [lane, setLane] = React.useState<Lane>(() => {
     return normalizeLane(localStorage.getItem("vibedeck.lane") || "code");
   });
-  const [collapsed, setCollapsed] = React.useState(false);
+  // Like the webapp, the sidebar steps aside on narrow windows.
+  const [collapsed, setCollapsed] = React.useState(() => window.matchMedia?.("(max-width: 767px)").matches ?? false);
+  React.useEffect(() => {
+    const narrow = window.matchMedia?.("(max-width: 767px)");
+    if (!narrow) return;
+    const onChange = (event: MediaQueryListEvent) => setCollapsed(event.matches);
+    narrow.addEventListener("change", onChange);
+    return () => narrow.removeEventListener("change", onChange);
+  }, []);
   const navigate = useNavigate();
   const location = useLocation();
   const inWorkspace = location.pathname.startsWith("/workspace/");
@@ -62,6 +70,16 @@ export function AppShell() {
     localStorage.setItem("vibedeck.lane", lane);
   }, [lane]);
 
+  // Tray menu items (New session, Usage, Settings) route the app.
+  React.useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const route = (e as CustomEvent).detail;
+      if (typeof route === "string" && route.startsWith("/")) navigate(route);
+    };
+    window.addEventListener("vibedeck:navigate", onNavigate);
+    return () => window.removeEventListener("vibedeck:navigate", onNavigate);
+  }, [navigate]);
+
   // Settings can change the default lane — apply it live.
   React.useEffect(() => {
     const onLane = (e: Event) => {
@@ -73,7 +91,7 @@ export function AppShell() {
   }, []);
 
   const iconBtn =
-    "h-8 w-8 grid place-items-center rounded-md text-text-faint hover:text-text hover:bg-surface-muted transition-colors";
+    "h-8 w-8 grid place-items-center rounded-md text-text-muted hover:text-text hover:bg-surface-muted transition-colors duration-150";
 
   const switchLane = (l: Lane) => { setLane(l); navigate("/"); };
 
@@ -91,14 +109,14 @@ export function AppShell() {
           collapsed={collapsed}
           onToggleCollapse={() => setCollapsed((c) => !c)}
         />}
-        {!inWorkspace && collapsed && <div className="w-12 shrink-0 border-r border-sidebar-border bg-sidebar p-2 pt-3">
+        {!inWorkspace && collapsed && <div className="w-12 shrink-0 border-r border-sidebar-border bg-sidebar p-2 pt-2.5">
             <button
               onClick={() => setCollapsed(false)}
               title="Show sidebar"
               aria-label="Show sidebar"
               className={iconBtn}
             >
-              <PanelLeft size={15} />
+              <PanelLeft size={16} />
             </button>
         </div>}
         <main className="flex-1 min-w-0 h-full overflow-hidden bg-bg relative">
@@ -109,7 +127,7 @@ export function AppShell() {
               aria-label="Settings"
               className={`absolute top-3 right-3 z-10 ${iconBtn}`}
             >
-              <Settings size={15} />
+              <Settings size={16} />
             </button>
           )}
           <React.Suspense fallback={<div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-text-muted"><Spinner />Loading...</div>}>
@@ -124,9 +142,9 @@ export function AppShell() {
         create={create}
         onToggleSidebar={() => setCollapsed((c) => !c)}
       />}
-      {welcome && <dialog ref={welcomeRef} aria-labelledby="mistral-welcome-title" onCancel={event => { event.preventDefault(); dismissWelcome(); }} className="w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-border bg-surface-raised p-6 text-text shadow-2xl backdrop:bg-black/60">
+      {welcome && <dialog ref={welcomeRef} aria-labelledby="mistral-welcome-title" onCancel={event => { event.preventDefault(); dismissWelcome(); }} className="w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-border bg-surface-raised p-6 text-text shadow-lg backdrop:bg-black/70">
         <h2 id="mistral-welcome-title" className="text-lg font-semibold">Welcome to VibeDeck</h2>
-        <p className="mt-3 text-sm text-text-muted">Connect your Mistral account with Google or email for your desktop workspace and subscription usage. Sign-in opens in regular Chrome; your workspace then runs inside VibeDeck.</p>
+        <p className="mt-3 text-sm text-text-muted">Connect your Mistral account with Google or email for your desktop workspace and subscription usage. Sign-in opens in a Chromium-based browser (Chrome, Brave, Helium…); your workspace then runs inside VibeDeck.</p>
         <p className="mt-3 text-xs text-text-faint">Your CLI account is shared with Vibe. If it needs setup, run <code>vibe --setup</code> in your terminal. Studio uses a separate Mistral API key.</p>
         {signInError && <p role="alert" className="mt-3 text-sm text-danger">{signInError}</p>}
         {connecting && <div className="mt-5"><SignInConfirmation /></div>}

@@ -4,6 +4,7 @@ import { getSkills, setSharedSkills } from "@/lib/api";
 import { Button, Card, CardBody, Badge, Spinner, Input } from "@/components/ui";
 import { Puzzle, RefreshCw } from "lucide-react";
 import type { SkillInfo } from "@/lib/types";
+import { SkillRegistry } from "@/components/SkillRegistry";
 
 export function SkillsView() {
   const [skills, setSkills] = React.useState<SkillInfo[]>([]);
@@ -49,6 +50,7 @@ export function SkillsView() {
         <Link to="/workspace/skills" className="inline-block text-sm text-primary hover:underline">Manage web workspace skills</Link>
       </div>
       {error && <p role="alert" className="mb-3 text-sm text-danger">{error}</p>}
+      <SkillRegistry />
       <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter skills…" className="max-w-sm mb-4" />
       {loading && <div className="text-text-muted text-sm flex items-center gap-2"><Spinner /> Loading…</div>}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
