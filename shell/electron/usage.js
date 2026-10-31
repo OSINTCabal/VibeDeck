@@ -43,7 +43,7 @@ async function read(year, month, refresh = false) {
 }
 async function readRemote(year, month, version) {
   if (!await browser.available()) return { status: "disconnected", source: "web", allowances: [], billing: null,
-    detail: "Connect Mistral usage with Google in Chrome. VibeDeck keeps the connection in the background." };
+    detail: "Connect Mistral usage with Google in a Chromium-based browser. VibeDeck keeps the connection in the background." };
   let expired = false, signingIn = false;
   async function get(url, asText = false, required = true) {
     const response = await browser.read(url);

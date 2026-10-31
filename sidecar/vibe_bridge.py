@@ -29,6 +29,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
@@ -42,8 +43,15 @@ DEFAULT_AGENT = "accept-edits"
 # Desktop agent modes; Plan is installed as a read-only profile on Vibe 3.
 AGENT_MODES = ("ask", "plan", "accept-edits", "auto-approve")
 
-# Reasoning / thinking levels accepted by config/model/write.
+# Standard reasoning / thinking levels. Since Vibe 3.0.4 a model's
+# thinking_levels may list levels of its own (e.g. "turbo", "minimal"), which
+# config/model/write sends to the provider as written.
 REASONING_LEVELS = ("off", "low", "medium", "high", "max")
+_REASONING_WORD = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+
+
+def valid_reasoning(level: str) -> bool:
+    return level in REASONING_LEVELS or bool(_REASONING_WORD.fullmatch(level))
 
 # Approval decision types (ApprovalDecisionType StrEnum, lowercased names).
 APPROVAL_DECISIONS = ("approve", "approve_for_session", "approve_permanently", "deny", "cancel_turn")

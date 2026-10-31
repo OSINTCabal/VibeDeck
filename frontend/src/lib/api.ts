@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts,
+  StudioCosts, VibeReleaseNotes,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -32,6 +32,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------- health/config
 
 export const getHealth = () => http<Health>("/api/health");
+export const getVibeReleaseNotes = () => http<VibeReleaseNotes>("/api/vibe/release-notes");
 export const getConfig = () => http<AppConfig>("/api/config");
 export const patchConfig = (body: Partial<AppConfig>) =>
   http<AppConfig>("/api/config", { method: "PATCH", body: JSON.stringify(body) });
@@ -119,7 +120,14 @@ export const getMcp = (sid?: string) =>
 export const getAgents = () => http<{ agents: AgentInfo[]; dir: string }>("/api/agents");
 export const getAudit = () => http<{ audit: { action: string; detail: string; ts: number }[] }>("/api/audit");
 export const getProjects = () =>
-  http<{ home: string; recent: { path: string; name: string; lastUsed: number }[]; known: { path: string; name: string }[] }>("/api/projects");
+  http<{ home: string; recent: { path: string; name: string; lastUsed: number; branch?: string | null }[];
+    known: { path: string; name: string }[]; repos?: { path: string; name: string; branch: string }[] }>("/api/projects");
+
+export interface GitBranches { root: string; current: string | null; branches: string[]; dirty: boolean | null }
+export const getGitBranches = (path: string) =>
+  http<GitBranches>(`/api/git/branches?path=${encodeURIComponent(path)}`);
+export const switchGitBranch = (path: string, branch: string, create = false) =>
+  http<GitBranches>("/api/git/switch", { method: "POST", body: JSON.stringify({ path, branch, create }) });
 
 export const getWorkspace = (kind: "connectors" | "libraries", signal?: AbortSignal) =>
   http<{ items: { id: string; name: string; description: string; connected?: boolean; documents?: number | null }[] }>(`/api/workspace/${kind}`, { signal });
@@ -264,3 +272,34 @@ export interface SubagentSettings {
 export const getSubagentSettings = () => http<SubagentSettings>("/api/agents/settings");
 export const saveSubagentSettings = (settings: SubagentSettings) =>
   http<SubagentSettings>("/api/agents/settings", {method:"PUT", body:JSON.stringify(settings)});
+
+// ---------------------------------------------------------------- Vibe Code Web (cloud teleport)
+
+export interface CloudProject { projectId: string; name: string; repositories: { repoUrl: string; defaultBranch?: string | null }[]; isReadOnly?: boolean }
+export interface CloudPickerView {
+  context: { repoRoot: string; repoUrl: string; repoName: string; savedLink?: { projectId: string; projectName: string } | null };
+  state: { projects: CloudProject[]; nextCursor?: string | null; repoUrl: string };
+  git: { remoteName: string; remoteUrl: string; repo: string; branch?: string | null; defaultBranch?: string | null };
+}
+export interface TeleportStatus {
+  operationId: string; status: string; url: string | null; error: string | null; done: boolean;
+  push: { unpushedCount: number; branchNotPushed: boolean } | null;
+  events: { kind: string; at: number }[];
+}
+const cloud = (sid: string, path: string, body?: unknown) =>
+  http<any>(`/api/sessions/${sid}/cloud${path}`, body === undefined ? undefined : { method: "POST", body: JSON.stringify(body) });
+export const cloudOpen = (sid: string, prompt?: string) =>
+  cloud(sid, "/open", { prompt: prompt || null }) as Promise<{ pickerId: string; view: CloudPickerView; resolvedProjectId?: string | null }>;
+export const cloudMore = (sid: string, pickerId: string) =>
+  cloud(sid, "/projects/more", { pickerId }) as Promise<{ view: CloudPickerView }>;
+export const cloudSelect = (sid: string, pickerId: string, projectId: string) =>
+  cloud(sid, "/projects/select", { pickerId, projectId }) as Promise<{ view: CloudPickerView; project: CloudProject }>;
+export const cloudCreate = (sid: string, pickerId: string, name: string, defaultBranch: string) =>
+  cloud(sid, "/projects/create", { pickerId, name, defaultBranch }) as Promise<{ view: CloudPickerView; project: CloudProject }>;
+export const cloudCancel = (sid: string, pickerId: string) => cloud(sid, "/cancel", { pickerId });
+export const cloudTeleport = (sid: string, pickerId: string, projectId: string, prompt?: string) =>
+  cloud(sid, "/teleport", { pickerId, projectId, prompt: prompt || null }) as Promise<TeleportStatus>;
+export const cloudTeleportStatus = (sid: string, op: string) => cloud(sid, `/teleport/${op}`) as Promise<TeleportStatus>;
+export const cloudTeleportPush = (sid: string, op: string, approved: boolean) =>
+  cloud(sid, `/teleport/${op}/push`, { approved }) as Promise<TeleportStatus>;
+export const cloudTeleportCancel = (sid: string, op: string) => cloud(sid, `/teleport/${op}/cancel`, {}) as Promise<TeleportStatus>;

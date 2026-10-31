@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" shape-rendering="crispEdges">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26262c"/>
+      <stop offset="1" stop-color="#0f0f12"/>
+    </linearGradient>
+    <linearGradient id="sheen" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.10"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="232" fill="url(#bg)" shape-rendering="geometricPrecision"/>
+  <rect x="1.5" y="1.5" width="1021" height="1021" rx="230.5" fill="none" stroke="url(#sheen)" stroke-width="3" shape-rendering="geometricPrecision"/>
+  <rect x="312" y="312" width="80" height="80" fill="#FFAF01"/>
+  <rect x="632" y="312" width="80" height="80" fill="#FFAF01"/>
+  <rect x="312" y="392" width="160" height="80" fill="#FF8204"/>
+  <rect x="552" y="392" width="160" height="80" fill="#FF8204"/>
+  <rect x="312" y="472" width="400" height="80" fill="#FA500F"/>
+  <rect x="312" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="472" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="632" y="552" width="80" height="80" fill="#E51300"/>
+  <rect x="232" y="632" width="240" height="80" fill="#C4001D"/>
+  <rect x="552" y="632" width="240" height="80" fill="#C4001D"/>
+</svg>
