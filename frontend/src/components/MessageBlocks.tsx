@@ -3,12 +3,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
-  Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
+  Lightbulb, Wrench, ShieldCheck, ShieldX, MessageCircleQuestion, ChevronRight, Terminal, FileCode2,
   Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History, GitFork, Shrink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { interruptShell } from "@/lib/api";
-import { Badge, usePresence } from "./ui";
+import { usePresence } from "./ui";
 import type { HistoryEntry } from "@/lib/types";
 import { durationSeconds, isManualShell, stepStatus, summarizeSteps } from "@/lib/steps";
 
@@ -312,6 +312,13 @@ function StatusMark({ status }: { status: string }) {
 
 // ---------------------------------------------------------------- Approval card
 
+const CHOICES: Record<string, string> = {
+  approve: "Approve", approve_for_session: "Approve for session", approve_permanently: "Always approve", deny: "Deny", cancel_turn: "Cancel turn",
+};
+const DECISIONS: Record<string, string> = {
+  approve: "Approved", approve_for_session: "Approved for this session", approve_permanently: "Always allowed", deny: "Denied", cancel_turn: "Turn cancelled",
+};
+
 export function ApprovalCard({
   e, onResolve,
 }: {
@@ -321,7 +328,9 @@ export function ApprovalCard({
   const [busy, setBusy] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const d: any = e.detail || {};
-  const effect: HistoryEntry | undefined = d?.effect;
+  // the effect is Vibe's EffectDetail: toolName plus a display summary
+  const effect: { toolName?: string; display?: { summary?: string; message?: string } } | undefined = d?.effect;
+  const summary = effect?.display?.summary || effect?.display?.message || effect?.toolName || "";
   const reason = d?.reason;
   const choices: string[] = d?.choices || ["approve", "deny"];
   const open = e.state?.status === "open";
@@ -337,6 +346,22 @@ export function ApprovalCard({
     }
   };
 
+  if (answered) {
+    // settled: one quiet line, the tool itself shows in the steps around it
+    const decision: string | undefined = (e.state as any)?.output?.decision?.type;
+    const denied = decision === "deny" || decision === "cancel_turn";
+    const label = decision ? DECISIONS[decision] || decision : `Approval ${e.state?.status}`;
+    return (
+      <div className="px-6 py-0.5">
+        <div className="flex min-w-0 items-center gap-2 text-[13px] text-text-faint">
+          {denied ? <ShieldX size={13} className="shrink-0 text-danger/80" /> : <ShieldCheck size={13} className="shrink-0" />}
+          <span className="shrink-0">{label}</span>
+          {summary && <span className="min-w-0 truncate font-mono text-xs" title={summary}>{summary}</span>}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="px-6 py-2">
       <div className="rounded-xl border border-border bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgb(0_0_0/0.12)] animate-fade-in">
@@ -347,25 +372,18 @@ export function ApprovalCard({
               {open ? "Approval required" : answered ? "Approval resolved" : e.title || "Approval"}
             </div>
             <div className="text-[13px] text-text-muted mt-1 font-mono break-all">
-              {effect ? toolSummary(effect) : e.title}
+              {summary || e.title}
             </div>
             {reason && <div className="text-xs text-text-faint mt-1">{reason}</div>}
             {open && (
               <div className="flex flex-wrap items-center gap-2 mt-3">
                 {choices.map(choice => <button key={choice} disabled={busy !== null} onClick={() => void act(choice)}
                   className={cn("h-8 px-3 rounded-md text-sm font-medium transition-colors duration-75 ease-out disabled:opacity-50", choice === "approve" ? "vd-send" : "border border-border text-text hover:bg-surface-muted")}>
-                  {busy === choice ? "Sending…" : ({ approve: "Approve", approve_for_session: "Approve for session", approve_permanently: "Always approve", deny: "Deny", cancel_turn: "Cancel turn" } as Record<string, string>)[choice] || choice}
+                  {busy === choice ? "Sending…" : CHOICES[choice] || choice}
                 </button>)}
               </div>
             )}
             {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
-            {answered && (
-              <div className="mt-2">
-                <Badge tone={e.state?.status === "answered" ? "success" : "default"}>
-                  {e.state?.status}
-                </Badge>
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -393,9 +411,31 @@ export function QuestionCard({ e, onResolve }: {
       })) });
     } catch (err) { setError(String(err)); } finally { setBusy(false); }
   };
+  if (!open) {
+    // settled: the answers in a compact list
+    const result = (e.state as any)?.output?.result;
+    const answers: { question: string; answer: string }[] = result?.answers || [];
+    return (
+      <div className="px-6 py-1">
+        <div className="flex gap-2 text-[13px]">
+          <MessageCircleQuestion size={13} className="mt-[3px] shrink-0 text-text-faint" />
+          {result?.cancelled || !answers.length
+            ? <span className="text-text-faint">{result?.cancelled ? "Questions skipped" : "Questions answered"}</span>
+            : <dl className="min-w-0 space-y-0.5">
+              {answers.map((a, i) => (
+                <div key={i} className="flex min-w-0 gap-1.5">
+                  <dt className="shrink-0 text-text-faint">{questions[i]?.header || a.question}:</dt>
+                  <dd className="min-w-0 text-text-muted">{a.answer || "—"}</dd>
+                </div>
+              ))}
+            </dl>}
+        </div>
+      </div>
+    );
+  }
   return <div className="px-6 py-2"><div className="rounded-xl border border-border bg-surface p-4 shadow-[0_1px_2px_rgb(0_0_0/0.12)]">
-    <h3 className="text-sm font-medium">{open ? "Vibe needs your input" : "Input resolved"}</h3>
-    {open && <form onSubmit={event => { event.preventDefault(); void submit(false); }} className="mt-3 space-y-4">
+    <h3 className="text-sm font-medium">Vibe needs your input</h3>
+    <form onSubmit={event => { event.preventDefault(); void submit(false); }} className="mt-3 space-y-4">
       {questions.map((q: any, i: number) => <fieldset key={i} disabled={busy} className="space-y-2">
         <legend className="mb-2 text-sm">{q.question}</legend>
         {(q.options || []).map((option: any) => <label key={option.label} className="flex items-start gap-2 text-sm text-text-muted">
@@ -406,7 +446,7 @@ export function QuestionCard({ e, onResolve }: {
         {(!q.hideOther || !q.options?.length) && <input aria-label={`Your answer: ${q.question}`} value={other[i] || ""} onChange={event => setOther(s => ({ ...s, [i]: event.target.value }))} placeholder="Your answer" className="w-full rounded-md border border-border bg-surface px-3 py-2 text-sm transition-colors hover:border-border-strong focus-visible:outline-none focus-visible:border-border-strong" />}
       </fieldset>)}
       <div className="flex gap-2"><button disabled={busy || questions.some((_: unknown, i: number) => !selected[i]?.length && !other[i]?.trim())} className="vd-send h-8 rounded-md px-3 text-sm font-medium disabled:opacity-50">{busy ? "Sending…" : "Submit answers"}</button><button type="button" disabled={busy} onClick={() => void submit(true)} className="h-8 rounded-md px-3 text-sm text-text-muted transition-colors hover:bg-surface-muted hover:text-text">Cancel</button></div>
-    </form>}
+    </form>
     {error && <p role="alert" className="mt-2 text-xs text-danger">{error}</p>}
   </div></div>;
 }
