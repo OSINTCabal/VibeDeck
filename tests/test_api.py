@@ -242,4 +242,53 @@ def test_projects(client, tmp_path, monkeypatch):
     # vibe CLI store — check the shape, not emptiness
     assert isinstance(d["recent"], list)
     for r in d["recent"]:
-        assert set(r) == {"path", "name", "lastUsed"}
+        assert set(r) == {"path", "name", "lastUsed", "branch"}
+    assert d["repos"] == []
+
+
+def _git(path, *args):
+    import subprocess
+    subprocess.run(["git", "-C", str(path), *args], check=True, capture_output=True,
+                   env={**__import__("os").environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"})
+
+
+def _repo(path, branch="main"):
+    path.mkdir(parents=True)
+    _git(path, "init", "-q", "-b", branch)
+    _git(path, "commit", "-q", "--allow-empty", "-m", "init")
+    return path
+
+
+def test_projects_lists_git_repos(client, tmp_path, monkeypatch):
+    import vibedeck_server
+    monkeypatch.setattr(vibedeck_server.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(vibedeck_server, "_repo_cache", None)
+    _repo(tmp_path / "Проекти" / "bms")
+    _repo(tmp_path / "code" / "api", branch="dev")
+    _repo(tmp_path / "node_modules" / "skipped")
+    _repo(tmp_path / ".hidden" / "skipped")
+    _repo(tmp_path / "a" / "b" / "c" / "too-deep")
+    (tmp_path / "plain").mkdir()
+    d = client.get("/api/projects").json()
+    assert [(r["name"], r["branch"]) for r in d["repos"]] == [("api", "dev"), ("bms", "main")]
+
+
+def test_git_branches_and_switch(client, tmp_path):
+    repo = _repo(tmp_path / "repo")
+    _git(repo, "branch", "feature/x")
+    r = client.get("/api/git/branches", params={"path": str(repo / "")})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["current"] == "main" and set(d["branches"]) == {"main", "feature/x"} and d["dirty"] is False
+
+    r = client.post("/api/git/switch", json={"path": str(repo), "branch": "feature/x"})
+    assert r.status_code == 200 and r.json()["current"] == "feature/x"
+    r = client.post("/api/git/switch", json={"path": str(repo), "branch": "new-one", "create": True})
+    assert r.status_code == 200 and r.json()["current"] == "new-one"
+
+    for bad in ["-x", "a..b", "bad name", ""]:
+        assert client.post("/api/git/switch", json={"path": str(repo), "branch": bad}).status_code == 400
+    assert client.post("/api/git/switch", json={"path": str(repo), "branch": "missing"}).status_code == 409
+    assert client.get("/api/git/branches", params={"path": str(tmp_path)}).status_code == 404
+    assert client.get("/api/git/branches", params={"path": "relative/path"}).status_code == 400

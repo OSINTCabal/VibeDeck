@@ -23,7 +23,7 @@ import os
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 from vibe_bridge import BridgeError, SessionManager, VibeAppServer
 
@@ -111,23 +111,40 @@ class VibeSessionSync:
         # last title we saw in the store per session — lets us tell an
         # external (CLI-side) rename apart from a local one
         self._last_titles: dict[str, str] = {}
+        self._lister_lock = asyncio.Lock()
+        # set by the server: the current Vibe configuration's signature
+        self.config_signature: Optional[Callable[[], object]] = None
 
     # ------------------------------------------------------------ listing
 
-    async def _lister(self) -> VibeAppServer:
-        bridge = self.manager.get(LISTER_KEY)
-        if bridge is not None and bridge.alive:
+    async def _lister(self, config_signature: object = None) -> VibeAppServer:
+        # one at a time: concurrent first calls must not start two processes
+        async with self._lister_lock:
+            bridge = self.manager.get(LISTER_KEY)
+            stale = (config_signature is not None and bridge is not None
+                     and getattr(bridge, "config_signature", config_signature) != config_signature)
+            if bridge is not None and bridge.alive and not stale:
+                return bridge
+            if bridge is not None:
+                await self.manager.close(LISTER_KEY)
+            log = None
+            if self.log_dir is not None:
+                self.log_dir.mkdir(parents=True, exist_ok=True)
+                log = self.log_dir / "appserver-vibe-list.log"
+            # stamp the configuration this process starts under
+            stamp = self.config_signature() if self.config_signature else config_signature
+            bridge = VibeAppServer(cwd=str(Path.home()), stderr_log=log)
+            await bridge.start()
+            bridge.config_signature = stamp
+            self.manager.register(LISTER_KEY, bridge)
             return bridge
-        if bridge is not None:
-            await self.manager.close(LISTER_KEY)
-        log = None
-        if self.log_dir is not None:
-            self.log_dir.mkdir(parents=True, exist_ok=True)
-            log = self.log_dir / "appserver-vibe-list.log"
-        bridge = VibeAppServer(cwd=str(Path.home()), stderr_log=log)
-        await bridge.start()
-        self.manager.register(LISTER_KEY, bridge)
-        return bridge
+
+    async def host(self, config_signature: object = None) -> VibeAppServer:
+        """An app-server bound to no session, for host-wide calls (worktrees,
+        the model and agent registries). Given ``config_signature``, a process
+        started under another Vibe configuration is replaced, so registry reads
+        never come from a configuration that has since changed."""
+        return await self._lister(config_signature)
 
     async def refresh(self, force: bool = False) -> dict[str, dict]:
         """Re-list the shared store (throttled). Returns items keyed by id."""

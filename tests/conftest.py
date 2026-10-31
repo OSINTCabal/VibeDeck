@@ -37,6 +37,19 @@ def isolated_runtime(monkeypatch, request):
     server._vibe_models_cache = None
     server._agents_cache = None
     server.vsync._last_refresh = 0
+    # each TestClient runs its own event loop: start every test with a fresh
+    # host-bridge lock and no registry state carried over from another test
+    import asyncio
+    server.vsync._lister_lock = asyncio.Lock()
+    server._agents_lock = asyncio.Lock()
+    server._vibe_models_lock = asyncio.Lock()
+    server._registry_generation = 0
+    # startup prewarming would hold registry locks across test event loops
+    async def no_prewarm():
+        return None
+    monkeypatch.setattr(server, "_prewarm", no_prewarm)
+    for kind in ("models", "agents"):
+        server.store.set_config(f"vibe_registry_{kind}", None)
     monkeypatch.delenv("MISTRAL_API_KEY", raising=False)
     monkeypatch.delenv("MISTRAL_ADMIN_API_KEY", raising=False)
     monkeypatch.setattr(mistral_api, "_keyring_key", lambda: None)

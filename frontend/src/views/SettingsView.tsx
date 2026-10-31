@@ -7,13 +7,17 @@ import {
 import { Card, CardBody, Select, Badge, Button, Input } from "@/components/ui";
 import { useVibeModels } from "@/components/Pickers";
 import { ProvidersSection } from "@/components/ProvidersSection";
+import { VibeReleaseNotes } from "@/components/VibeReleaseNotes";
+import { WorktreesCard } from "@/components/WorktreesCard";
 import { THEMES, getTheme, setTheme, type ThemeId } from "@/lib/theme";
+import { BACKDROPS, setBackdrop, useBackdrop } from "@/lib/backdrop";
 import {
   notificationsEnabled, setNotificationsEnabled, notificationsSupported,
 } from "@/lib/notifications";
 import { Check, Plug, Boxes, SlidersHorizontal } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, modelLabel } from "@/lib/utils";
 import type { ApiKeyStatus } from "@/lib/types";
+import type { DesktopSettings } from "@/lib/windowControls";
 
 const AGENTS = [
   { value: "ask", label: "ask — asks permission for actions that need approval" },
@@ -43,6 +47,7 @@ function keySourceLabel(source: ApiKeyStatus["source"]): string {
 
 export function SettingsView() {
   const { health, config } = useOutletContext<any>();
+  const [notesOpen, setNotesOpen] = React.useState(false);
   const [params] = useSearchParams();
   const section = params.get("section") === "models" ? "models" : params.get("section") === "config" ? "config" : "providers";
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -112,8 +117,8 @@ export function SettingsView() {
   };
 
   const modelOptions = models.length
-    ? models.map((m) => ({ value: m.id, label: m.id }))
-    : [{ value: model, label: model }];
+    ? models.map((m) => ({ value: m.id, label: modelLabel(m.id, m.name) }))
+    : [{ value: model, label: modelLabel(model) }];
 
   const ksl = keyStatusLabel(keyStatus);
 
@@ -236,6 +241,7 @@ export function SettingsView() {
         <CardBody className="space-y-4">
           <div className="text-xs font-medium text-text-muted">Appearance</div>
           <ThemePicker />
+          <BackdropPicker />
           <ZoomControl />
           <div className="flex items-center justify-between">
             <div>
@@ -246,6 +252,7 @@ export function SettingsView() {
             </div>
             <NotificationsToggle />
           </div>
+          <TrayControl />
           <div>
             <label className="block text-xs font-medium text-text-muted mb-1.5">Default lane</label>
             <DefaultLaneSelect />
@@ -283,9 +290,25 @@ export function SettingsView() {
               tone={health?.api_key ? "success" : "warning"}
             />
             <Row label="Version" value={`vibedeck ${health?.version || "—"}`} />
+            <div className="flex items-center justify-between">
+              <span className="text-text-muted">Vibe</span>
+              <span className="flex items-center gap-2">
+                {health?.vibe?.outdated && <Badge tone="warning">{health.vibe.recommended} available</Badge>}
+                <span className="font-mono text-xs">{health?.vibe?.version || "—"}</span>
+                <button type="button" onClick={() => setNotesOpen(true)} className="text-xs text-primary hover:underline">What’s new</button>
+              </span>
+            </div>
+            {health?.vibe?.outdated && (
+              <p className="text-xs text-text-faint">
+                Update with <code className="font-mono">{health.vibe.upgradeCommand}</code> for custom thinking levels and teleport fixes.
+              </p>
+            )}
           </div>
+          <VibeReleaseNotes open={notesOpen} onClose={() => setNotesOpen(false)} />
         </CardBody>
       </Card>
+
+      <WorktreesCard />
 
       <Card>
         <CardBody className="space-y-3">
@@ -372,6 +395,29 @@ function ThemePicker() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- background picker
+
+function BackdropPicker() {
+  const current = useBackdrop();
+  return (
+    <div>
+      <div className="text-xs font-medium text-text-muted">Background</div>
+      <p className="mt-0.5 mb-1.5 text-xs text-text-faint">Animated, behind the app. It calms down once a chat has messages and livens up while the model works.</p>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Background">
+        {BACKDROPS.map(b => (
+          <button key={b.id} type="button" role="radio" aria-checked={current === b.id} title={b.description}
+            onClick={() => setBackdrop(b.id)}
+            className={cn("inline-flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs transition-colors",
+              current === b.id ? "border-primary text-text ring-1 ring-primary" : "border-border text-text-muted hover:border-border-strong hover:text-text")}>
+            {b.name}
+            {current === b.id && <Check size={11} className="text-primary" />}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -495,6 +541,50 @@ function ZoomControl() {
   </div>;
 }
 
+
+function TrayControl() {
+  const desktop = window.vibedeck?.desktop;
+  const [settings, setSettings] = React.useState<DesktopSettings | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [error, setError] = React.useState("");
+  React.useEffect(() => { void desktop?.get().then(setSettings).catch(() => setError("Could not read desktop settings.")); }, [desktop]);
+  if (!desktop) return null;
+  const toggle = async (closeToTray: boolean) => {
+    if (busy) return;
+    setBusy(true); setError("");
+    try { setSettings(await desktop.set({ closeToTray })); }
+    catch { setError("Could not save this setting. Try again."); }
+    finally { setBusy(false); }
+  };
+  const enabled = !!settings?.closeToTray;
+  const available = !!settings?.tray;
+  return <div>
+    <div className="flex items-center justify-between">
+      <div>
+        <div className="text-xs font-medium text-text-muted">Keep running in the tray</div>
+        <p className="text-xs text-text-faint mt-0.5">{settings && !available
+          ? "Your desktop has no system tray, so closing the window quits VibeDeck."
+          : "Closing the window hides VibeDeck to the tray icon. Quit from the tray menu."}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-label="Keep running in the tray"
+        aria-checked={enabled}
+        disabled={busy || !available}
+        onClick={() => void toggle(!enabled)}
+        className={cn(
+          "relative h-5 w-9 shrink-0 rounded-full transition-colors",
+          enabled ? "bg-primary" : "bg-surface-muted",
+          (busy || !available) && "opacity-50",
+        )}
+      >
+        <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all", enabled ? "left-[18px]" : "left-0.5")} />
+      </button>
+    </div>
+    {error && <p role="alert" className="mt-1 text-xs text-danger">{error}</p>}
+  </div>;
+}
 
 function Subagents() {
   const [settings, setSettings] = React.useState<SubagentSettings | null>(null);

@@ -13,6 +13,13 @@ export interface WindowState {
   fullscreen: boolean;
 }
 
+export interface DesktopSettings {
+  /** Hide to the tray instead of quitting when the window is closed. */
+  closeToTray: boolean;
+  /** Whether a tray icon could be created on this desktop. */
+  tray: boolean;
+}
+
 interface VibedeckBridge {
   platform: string;
   workspace?: {
@@ -30,6 +37,13 @@ interface VibedeckBridge {
     confirmSignIn: (accepted: boolean) => Promise<boolean>;
     disconnect: () => Promise<boolean>;
     read: (year: number, month: number, refresh?: boolean) => Promise<import("./types").UsageSnapshot>;
+  };
+  desktop?: {
+    get: () => Promise<DesktopSettings>;
+    set: (patch: Partial<Pick<DesktopSettings, "closeToTray">>) => Promise<DesktopSettings>;
+  };
+  tray?: {
+    setUsage: (value: { label: string; percent: number } | null) => Promise<void>;
   };
   getZoom: () => Promise<number>;
   setZoom: (factor: number) => Promise<number>;

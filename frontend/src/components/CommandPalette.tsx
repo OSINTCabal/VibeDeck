@@ -2,15 +2,18 @@ import * as React from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Boxes, Code2, FlaskConical, FolderOpen, Home, MessageSquare, PanelLeft,
-  Plus, Puzzle, Search, Settings, LogOut,
+  Plus, Puzzle, Search, Settings, LogOut, Sparkles,
 } from "lucide-react";
+import { getSkills } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { isFrameless, closeWindow } from "@/lib/windowControls";
 import type { Lane, Session } from "@/lib/types";
 
 interface Command {
   id: string;
-  group: "Actions" | "Navigation" | "Sessions";
+  group: "Actions" | "Navigation" | "Sessions" | "Skills";
+  /** Listed only once the user types a query (keeps the empty palette short). */
+  searchOnly?: boolean;
   label: string;
   hint?: string;
   keywords: string;
@@ -46,12 +49,11 @@ function fuzzy(query: string, text: string): number {
  * webapp). Arrow keys navigate, Enter runs, Escape closes.
  */
 export function CommandPalette({
-  lane, setLane, sessions, create, onToggleSidebar,
+  lane, setLane, sessions, onToggleSidebar,
 }: {
   lane: Lane;
   setLane: (l: Lane) => void;
   sessions: Session[];
-  create: (opts: { cwd: string; lane: Lane }) => Promise<Session>;
   onToggleSidebar: () => void;
 }) {
   const navigate = useNavigate();
@@ -59,6 +61,13 @@ export function CommandPalette({
   const [query, setQuery] = React.useState("");
   const [active, setActive] = React.useState(0);
   const listRef = React.useRef<HTMLDivElement>(null);
+  const [skills, setSkills] = React.useState<string[]>([]);
+  React.useEffect(() => {
+    if (!open) return;
+    let closed = false;
+    getSkills().then(d => { if (!closed) setSkills(d.skills.map(s => s.name)); }).catch(() => {});
+    return () => { closed = true; };
+  }, [open]);
 
   const commands = React.useMemo<Command[]>(() => {
     const cmds: Command[] = [
@@ -68,10 +77,7 @@ export function CommandPalette({
         hint: lane === "code" ? "code lane" : "work lane",
         keywords: "new chat session start create begin",
         icon: Plus,
-        run: async () => {
-          const s = await create({ cwd: "", lane });
-          navigate(`/sessions/${s.id}`);
-        },
+        run: () => navigate("/"),
       },
       {
         id: "toggle-sidebar", group: "Actions",
@@ -175,27 +181,37 @@ export function CommandPalette({
         run: () => closeWindow(),
       });
     }
-    // recent sessions in the current lane
-    const recent = sessions
-      .filter((s) => s.lane === lane)
-      .sort((a, b) => b.updated_at - a.updated_at)
-      .slice(0, 5);
-    for (const s of recent) {
+    // sessions: the five latest in this lane up front; a query searches all of them
+    const sorted = [...sessions].sort((a, b) => b.updated_at - a.updated_at);
+    const recent = new Set(sorted.filter((s) => s.lane === lane).slice(0, 5).map((s) => s.id));
+    for (const s of sorted) {
       cmds.push({
         id: `session-${s.id}`, group: "Sessions",
         label: s.title || "Untitled session",
         hint: s.cwd,
         keywords: `session chat ${s.title} ${s.cwd}`,
         icon: FolderOpen,
+        searchOnly: !recent.has(s.id),
         run: () => navigate(`/sessions/${s.id}`),
       });
     }
+    // skills: drop an instruction into the composer
+    for (const name of skills) {
+      cmds.push({
+        id: `skill-${name}`, group: "Skills",
+        label: `Use skill: ${name}`,
+        keywords: `skill ${name}`,
+        icon: Sparkles,
+        run: () => { window.dispatchEvent(new CustomEvent("vibedeck:insert", { detail: `Use the "${name}" skill: ` })); },
+      });
+    }
     return cmds;
-  }, [lane, sessions, create, navigate, setLane, onToggleSidebar]);
+  }, [lane, sessions, skills, navigate, setLane, onToggleSidebar]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim();
     const scored = commands
+      .filter((c) => q || !c.searchOnly)
       .map((c) => {
         const full = fuzzy(q, `${c.label} ${c.keywords} ${c.group}`);
         if (full < 0) return { c, score: -1 };
@@ -306,7 +322,7 @@ export function CommandPalette({
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-[2px] flex items-start justify-center pt-[16vh] animate-fade-in"
       onMouseDown={(e) => { if (e.target === e.currentTarget) closePalette(); }}
     >
-      <div className="w-full max-w-xl mx-4 rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up">
+      <div className="vd-menu w-full max-w-xl mx-4 rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden">
         <div className="flex items-center gap-2 px-3 border-b border-border">
           <Search size={15} className="text-text-faint shrink-0" />
           <input
