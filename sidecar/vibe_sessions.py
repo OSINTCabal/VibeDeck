@@ -129,6 +129,10 @@ class VibeSessionSync:
         self.manager.register(LISTER_KEY, bridge)
         return bridge
 
+    async def host(self) -> VibeAppServer:
+        """An app-server bound to no session, for host-wide calls (worktrees)."""
+        return await self._lister()
+
     async def refresh(self, force: bool = False) -> dict[str, dict]:
         """Re-list the shared store (throttled). Returns items keyed by id."""
         async with self._lock:

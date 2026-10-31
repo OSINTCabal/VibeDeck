@@ -17,8 +17,6 @@ Dev:  python3 -m uvicorn vibedeck_server:app --host 127.0.0.1 --port 9377
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import getpass
 import hashlib
 import json
@@ -34,8 +32,16 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
+import cloud_teleport
+import git_projects
 import httpx
+import processes
 import providers as provider_config
+import review
+import session_rpc
+import turn_queue
+import vibe_install
+import worktrees
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
 from agent_routing import write_settings as write_agent_settings
@@ -70,6 +76,7 @@ from providers import (
 )
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from store import Store
+from turn_input import validate_images
 from usage import UsageReader
 from vibe_bridge import (
     AGENT_MODES,
@@ -80,6 +87,7 @@ from vibe_bridge import (
     BridgeError,
     SessionManager,
     find_app_server,
+    valid_reasoning,
 )
 from vibe_sessions import LISTER_KEY, VibeSessionSync, cleanup_store_dir
 
@@ -122,6 +130,8 @@ class SessionCreate(BaseModel):
     reasoning: Optional[str] = None
     lane: str = "code"          # work | code
     title: Optional[str] = None
+    # start in a new git worktree Vibe creates and names (its own branch)
+    worktree: StrictBool = False
 
 
 class ApiKeyReq(BaseModel):
@@ -282,10 +292,17 @@ def normalize_notification(msg: dict) -> dict:
         # SseEvent type expects session/activeCallbacks/lastEventId)
         st = p.get("state", {})
         return {"kind": "snapshot", **st, "lastEventId": st.get("eventId", 0)}
+    if method in ("session/compacted", "session/contextCleared"):
+        # the conversation was replaced (summary or clear): a fresh snapshot
+        st = p.get("state", {})
+        return {"kind": "snapshot", **st, "lastEventId": st.get("eventId", p.get("eventId", 0)),
+                "compacted": method == "session/compacted"}
     if method == "session/childSessionUpdated":
         return {"kind": "childSession", "childSession": p.get("childSession", {})}
     if method == "callback/requested":
         return {"kind": "callback", "callback": p.get("callback", {})}
+    if method == "turn/queueUpdated":
+        return turn_queue.queue_event(p) or {"kind": "raw", "method": method, "params": p}
     return {"kind": "raw", "method": method, "params": p}
 
 
@@ -304,6 +321,11 @@ def _live_sids() -> set:
 async def _ensure_bridge(sid: str) -> tuple[Any, str]:
     async with _session_lock(sid):
         return await _open_session(sid)
+
+
+# looked up per call so tests can patch _ensure_bridge
+session_rpc.configure(lambda sid: _ensure_bridge(sid))
+worktrees.configure(lambda: vsync.host(), lambda: [r["cwd"] for r in store.list_sessions() if r.get("cwd")])
 
 
 async def _open_session(sid: str) -> tuple[Any, str]:
@@ -378,7 +400,17 @@ def _persist_session_state(sid: str, state: dict) -> None:
             fields["reasoning" if field == "reasoningEffort" else field] = value
     status = session.get("status", {})
     fields["status"] = status.get("type", "idle") if isinstance(status, dict) else "idle"
+    path = _worktree_path(session)
+    if path:
+        fields["cwd"] = path
     store.upsert_session(sid, **fields)
+
+
+def _worktree_path(session: dict) -> Optional[str]:
+    """The worktree a session works in, once Vibe has created it."""
+    worktree = session.get("worktree")
+    path = worktree.get("path") if isinstance(worktree, dict) else None
+    return path if isinstance(path, str) and Path(path).is_dir() else None
 
 
 async def _stop_tap(sid: str) -> None:
@@ -501,6 +533,11 @@ app.add_middleware(
     allow_origins=list(LOCAL_ORIGINS),
     allow_methods=["*"], allow_headers=["*"],
 )
+# feature routers; included first so the catch-all /api route never shadows them
+app.include_router(review.router)
+app.include_router(turn_queue.router)
+app.include_router(worktrees.router)
+app.include_router(processes.router)
 
 
 @app.middleware("http")
@@ -541,8 +578,18 @@ async def health() -> dict:
         "default_model": DEFAULT_MODEL,
         "default_agent": DEFAULT_AGENT,
         "version": "1.1.0",
+        "vibe": vibe_install.info(srv),
         "user": getpass.getuser(),
     }
+
+
+@app.get("/api/vibe/release-notes")
+async def vibe_release_notes() -> dict:
+    try:
+        srv = find_app_server()
+    except FileNotFoundError:
+        srv = None
+    return {**vibe_install.info(srv), "notes": vibe_install.release_notes(srv)}
 
 
 # ---- API key management (add / remove at will; the key itself is never returned)
@@ -919,6 +966,9 @@ async def _fetch_vibe_models() -> list[dict]:
                         "name": m.get("displayName") or alias,
                         "supportsImages": bool(m.get("supportsImages")),
                         "thinkingLevels": m.get("thinkingLevels") or [],
+                        "thinking": m.get("thinking"),
+                        "maxContextLength": m.get("maxContextLength"),
+                        "autoCompactThreshold": m.get("autoCompactThreshold"),
                     })
         finally:
             await bridge.close()
@@ -1001,8 +1051,8 @@ async def patch_config(c: ConfigPatch) -> dict:
         known = await _known_agent_names()
         if c.default_agent not in known:
             raise HTTPException(400, f"unknown agent '{c.default_agent}'. Available: {', '.join(sorted(known))}")
-    if c.default_reasoning is not None and c.default_reasoning not in REASONING_LEVELS:
-        raise HTTPException(400, f"reasoning must be one of {REASONING_LEVELS}")
+    if c.default_reasoning is not None and not valid_reasoning(c.default_reasoning):
+        raise HTTPException(400, "invalid reasoning level")
     if c.default_model is not None:
         models = await _read_vibe_models()
         if models and c.default_model not in {m["id"] for m in models}:
@@ -1024,7 +1074,7 @@ async def create_session(s: SessionCreate) -> dict:
     s.model = s.model or store.get_config("default_model", DEFAULT_MODEL)
     if "reasoning" not in s.model_fields_set:
         s.reasoning = store.get_config("default_reasoning", None)
-    if s.reasoning is not None and s.reasoning not in REASONING_LEVELS:
+    if s.reasoning is not None and not valid_reasoning(s.reasoning):
         raise HTTPException(400, "invalid reasoning level")
     known = await _known_agent_names()
     if s.agent not in known:
@@ -1038,10 +1088,12 @@ async def create_session(s: SessionCreate) -> dict:
     bridge = None
     try:
         bridge = await manager.spawn(cwd, key=f"new-{uuid.uuid4().hex[:8]}")
-        await bridge.start_session()
+        await bridge.start_session(worktree={"kind": "auto"} if s.worktree else None)
     except (BridgeError, FileNotFoundError, OSError) as e:
         if bridge is not None:
             await bridge.close()
+        if s.worktree and isinstance(e, BridgeError) and e.code not in session_rpc.TRANSPORT_ERRORS:
+            raise HTTPException(400, f"Could not create a worktree: {e.message}") from e
         raise HTTPException(502, f"failed to start vibe session: {e}")
     sid = bridge.session_id
     manager.register(sid, bridge)
@@ -1064,6 +1116,18 @@ async def create_session(s: SessionCreate) -> dict:
         await manager.close(sid)
         raise HTTPException(502, f"Session {sid} was created but could not be read. Refresh the session list.") from e
     effective = state.get("session", {})
+    # a worktree session works in the worktree, not the folder it started
+    # from; Vibe reports the worktree shortly after the session starts
+    if s.worktree:
+        for _ in range(20):
+            if _worktree_path(effective):
+                break
+            await asyncio.sleep(0.25)
+            try:
+                effective = (await bridge.read_session(sid)).get("state", {}).get("session", {})
+            except BridgeError:
+                break
+        cwd = _worktree_path(effective) or cwd
     agent = effective.get("agent")
     if isinstance(agent, dict):
         agent = agent.get("name")
@@ -1178,7 +1242,7 @@ async def patch_session(sid: str, p: SessionPatch) -> dict:
 
 
 async def _patch_session(sid: str, p: SessionPatch) -> dict:
-    if p.reasoning is not None and p.reasoning not in REASONING_LEVELS:
+    if p.reasoning is not None and not valid_reasoning(p.reasoning):
         raise HTTPException(400, "invalid reasoning level")
     if p.agent is not None and p.agent not in await _known_agent_names():
         raise HTTPException(400, "unknown agent")
@@ -1249,6 +1313,43 @@ async def resume_session(sid: str) -> dict:
     return _public_session(store.get_session(sid))
 
 
+class ForkReq(BaseModel):
+    entry_id: Optional[str] = Field(None, alias="entryId", max_length=256)
+
+
+@app.post("/api/sessions/{sid}/fork")
+async def fork_session(sid: str, r: ForkReq) -> dict:
+    """Branch the conversation into a new session: the whole history, or up to
+    and including the turn of ``entryId``. The original stays as it is."""
+    row = store.get_session(sid)
+    if row is None:
+        raise HTTPException(404, "session not found")
+    params: dict[str, Any] = {"attach": False, "idempotencyKey": uuid.uuid4().hex}
+    if r.entry_id:
+        params["entryId"] = r.entry_id
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        res = await bridge.call("session/fork", {"sourceSessionId": esid, **params}, timeout=120)
+    except BridgeError as e:
+        if "Cannot find user entry" in e.message:
+            raise HTTPException(409, "This message was sent before VibeDeck recorded message ids, so Vibe "
+                                     "cannot fork from it. Fork the whole session instead.") from e
+        raise HTTPException(409, e.message) from e
+    session = ((res or {}).get("state") or {}).get("session") or {}
+    new_id = session.get("id")
+    if not isinstance(new_id, str) or not new_id:
+        raise HTTPException(502, "Vibe did not return the forked session")
+    agent = session.get("agent")
+    store.upsert_session(new_id, title=f"{row.get('title') or 'Session'} (fork)", cwd=session.get("cwd") or row["cwd"],
+                         agent=(agent.get("name") if isinstance(agent, dict) else agent) or row.get("agent"),
+                         model=session.get("model") or row.get("model"),
+                         reasoning=session.get("reasoningEffort", row.get("reasoning")),
+                         lane=row.get("lane") or "code", status="idle", warnings="[]")
+    store.upsert_costs(new_id, {})
+    store.audit("session.fork", f"{sid} -> {new_id}")
+    return _public_session(store.get_session(new_id))
+
+
 @app.post("/api/sessions/{sid}/release")
 async def release_session(sid: str) -> dict:
     async with _session_lock(sid, turns=True), _session_lock(sid):
@@ -1287,20 +1388,10 @@ async def _release_session(sid: str) -> dict:
 async def send_turn(sid: str, t: TurnReq) -> dict:
     if not t.text.strip() and not t.images:
         raise HTTPException(400, "message is empty")
-    if len(t.images) > 8:
-        raise HTTPException(400, "attach up to 8 images")
-    for image in t.images:
-        source = image.get("source") or {}
-        if not isinstance(source, dict):
-            raise HTTPException(400, "image source must be an inline image object")
-        data = source.get("data")
-        if source.get("kind") != "inline" or image.get("mimeType") not in ("image/png", "image/jpeg", "image/webp", "image/gif") or not isinstance(data, str) or len(data) > 14 * 1024 * 1024:
-            raise HTTPException(400, "images must be PNG, JPEG, WebP or GIF up to 10 MB")
-        try:
-            if len(base64.b64decode(data, validate=True)) > 10 * 1024 * 1024:
-                raise ValueError("too large")
-        except (ValueError, binascii.Error):
-            raise HTTPException(400, "invalid image data") from None
+    try:
+        validate_images(t.images)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     payload_hash = hashlib.sha256(json.dumps([t.text, t.images], sort_keys=True).encode()).hexdigest()
     async with _session_lock(sid, turns=True):
         previous = store.get_turn_request(sid, t.request_id)
@@ -1627,11 +1718,76 @@ async def get_projects() -> dict:
         p = home / d
         if p.is_dir() and str(p) not in seen:
             known.append({"path": str(p), "name": p.name})
+    for r in recent:
+        r["branch"] = git_projects.head_branch(Path(r["path"]))
     return {
         "home": str(home),
         "recent": recent[:10],
         "known": known,
+        "repos": await _discover_repos(home, [r["path"] for r in recent]),
     }
+
+
+# Git repositories under home and next to recent projects. The walk is
+# time-boxed and cached briefly; branches are re-read on every request.
+_repo_cache: tuple[float, tuple, list[dict]] | None = None
+
+
+def _vibe_trusted_folders() -> list[str]:
+    """Folders the Vibe CLI was trusted in — where the user actually codes."""
+    try:
+        path = provider_config.vibe_config_path().parent / "trusted_folders.toml"
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    return [p for p in data.get("trusted", []) if isinstance(p, str)]
+
+
+async def _discover_repos(home: Path, recent: list[str]) -> list[dict]:
+    global _repo_cache
+    roots: list[tuple[Path, int]] = [(home, 3)]
+    for path in [*recent, *_vibe_trusted_folders()]:
+        # siblings and cousins of places the user worked in (e.g. /mnt/disk/Projects/*)
+        for ancestor in list(Path(path).parents)[:2]:
+            if ancestor != home and home not in ancestor.parents and len(ancestor.parts) > 2 and ancestor.is_dir():
+                roots.append((ancestor, 2))
+    key = tuple(str(r) for r, _ in roots)
+    if _repo_cache and _repo_cache[1] == key and time.monotonic() - _repo_cache[0] < 120:
+        repos = _repo_cache[2]
+    else:
+        repos = await asyncio.to_thread(git_projects.find_repos, roots)
+        _repo_cache = (time.monotonic(), key, repos)
+    return [{**r, "branch": git_projects.head_branch(Path(r["path"])) or r["branch"]} for r in repos]
+
+
+class GitSwitchReq(BaseModel):
+    path: str
+    branch: str
+    create: StrictBool = False
+
+
+@app.get("/api/git/branches")
+async def git_branches(path: str = Query(..., min_length=1)) -> dict:
+    target = Path(path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    info = await asyncio.to_thread(git_projects.branches, target)
+    if info is None:
+        raise HTTPException(404, "not a git repository")
+    return info
+
+
+@app.post("/api/git/switch")
+async def git_switch(r: GitSwitchReq) -> dict:
+    target = Path(r.path).expanduser()
+    if not target.is_absolute() or not target.is_dir():
+        raise HTTPException(400, "path must be an existing absolute directory")
+    try:
+        return await asyncio.to_thread(git_projects.switch, target, r.branch, r.create)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
 
 
 # ---- direct API chat (Chat lane)
@@ -1715,6 +1871,121 @@ async def studio_account(sid: Optional[str] = Query(None)) -> dict:
         except BridgeError as e:
             out["error"] = e.message
     return out
+
+
+# ---- Vibe Code Web: continue a session in the cloud (teleport)
+
+_teleports = cloud_teleport.TeleportRegistry()
+
+
+class CloudOpenReq(BaseModel):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPickerReq(BaseModel):
+    picker_id: str = Field(..., alias="pickerId", min_length=1, max_length=200)
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class CloudSelectReq(CloudPickerReq):
+    project_id: str = Field(..., alias="projectId", min_length=1, max_length=200)
+
+
+class CloudCreateReq(CloudPickerReq):
+    name: str = Field(..., min_length=1, max_length=200)
+    default_branch: str = Field(..., alias="defaultBranch", min_length=1, max_length=200)
+
+
+class CloudTeleportReq(CloudSelectReq):
+    prompt: Optional[str] = Field(None, max_length=20000)
+
+
+class CloudPushReq(BaseModel):
+    approved: StrictBool
+
+
+_cloud_call = session_rpc.session_call
+
+
+@app.post("/api/sessions/{sid}/cloud/open")
+async def cloud_open(sid: str, r: CloudOpenReq) -> dict:
+    """Open the Vibe Code project picker for this session's git repository."""
+    params: dict[str, Any] = {"purpose": "teleport"}
+    if r.prompt:
+        params["prompt"] = r.prompt
+    return (await _cloud_call(sid, "vibeCode/projects/open", params))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/more")
+async def cloud_more(sid: str, r: CloudPickerReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/loadMore", {"pickerId": r.picker_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/select")
+async def cloud_select(sid: str, r: CloudSelectReq) -> dict:
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": r.project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/projects/create")
+async def cloud_create(sid: str, r: CloudCreateReq) -> dict:
+    """Create a Vibe Code project for the repository and select it."""
+    _, _, created = await _cloud_call(sid, "vibeCode/projects/create", {
+        "pickerId": r.picker_id, "name": r.name, "defaultBranch": r.default_branch})
+    project_id = ((created or {}).get("project") or {}).get("projectId")
+    if not project_id:
+        return created
+    return (await _cloud_call(sid, "vibeCode/projects/select",
+                              {"pickerId": r.picker_id, "projectId": project_id}))[2]
+
+
+@app.post("/api/sessions/{sid}/cloud/cancel")
+async def cloud_cancel(sid: str, r: CloudPickerReq) -> dict:
+    await _cloud_call(sid, "vibeCode/projects/cancel", {"pickerId": r.picker_id})
+    return {"ok": True}
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport")
+async def cloud_teleport_start(sid: str, r: CloudTeleportReq) -> dict:
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        op = await _teleports.start(bridge, sid, esid, r.picker_id, r.project_id, r.prompt)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    store.audit("cloud.teleport", f"{sid} -> {r.project_id}")
+    return op.view()
+
+
+def _teleport_op(sid: str, op_id: str) -> cloud_teleport.TeleportOperation:
+    op = _teleports.get(sid, op_id)
+    if op is None:
+        raise HTTPException(404, "teleport operation not found")
+    return op
+
+
+@app.get("/api/sessions/{sid}/cloud/teleport/{op_id}")
+async def cloud_teleport_status(sid: str, op_id: str) -> dict:
+    return _teleport_op(sid, op_id).view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/push")
+async def cloud_teleport_push(sid: str, op_id: str, r: CloudPushReq) -> dict:
+    op = _teleport_op(sid, op_id)
+    if op.push is None:
+        raise HTTPException(409, "Teleport is not waiting for push approval")
+    await _cloud_call(sid, "vibeCode/teleport/push/respond", {"operationId": op.id, "approved": r.approved})
+    return op.view()
+
+
+@app.post("/api/sessions/{sid}/cloud/teleport/{op_id}/cancel")
+async def cloud_teleport_cancel(sid: str, op_id: str) -> dict:
+    op = _teleport_op(sid, op_id)
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        await _teleports.cancel(bridge, esid, op)
+    except BridgeError as e:
+        raise HTTPException(409, e.message) from e
+    return op.view()
 
 
 @app.get("/api/studio/costs")
