@@ -49,12 +49,11 @@ function fuzzy(query: string, text: string): number {
  * webapp). Arrow keys navigate, Enter runs, Escape closes.
  */
 export function CommandPalette({
-  lane, setLane, sessions, create, onToggleSidebar,
+  lane, setLane, sessions, onToggleSidebar,
 }: {
   lane: Lane;
   setLane: (l: Lane) => void;
   sessions: Session[];
-  create: (opts: { cwd: string; lane: Lane }) => Promise<Session>;
   onToggleSidebar: () => void;
 }) {
   const navigate = useNavigate();
@@ -78,10 +77,7 @@ export function CommandPalette({
         hint: lane === "code" ? "code lane" : "work lane",
         keywords: "new chat session start create begin",
         icon: Plus,
-        run: async () => {
-          const s = await create({ cwd: "", lane });
-          navigate(`/sessions/${s.id}`);
-        },
+        run: () => navigate("/"),
       },
       {
         id: "toggle-sidebar", group: "Actions",
@@ -210,7 +206,7 @@ export function CommandPalette({
       });
     }
     return cmds;
-  }, [lane, sessions, skills, create, navigate, setLane, onToggleSidebar]);
+  }, [lane, sessions, skills, navigate, setLane, onToggleSidebar]);
 
   const filtered = React.useMemo(() => {
     const q = query.trim();

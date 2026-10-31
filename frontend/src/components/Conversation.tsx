@@ -15,6 +15,7 @@ import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
 import { sendTurn, enqueueTurn, forkSession, compactSession, runShell, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
+import { useSetBackdropMood } from "@/lib/backdrop";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
 
@@ -45,6 +46,7 @@ export function Conversation({ session }: { session: Session }) {
     if (acceptedAgent) setAgent(typeof acceptedAgent === "string" ? acceptedAgent : acceptedAgent.name);
   }, [conv.session?.model, conv.session?.agent]);
   const running = conv.turnStatus === "running";
+  useSetBackdropMood(running ? "working" : conv.entries.length ? "chat" : "idle");
 
   // pending file changes from Vibe's checkpoints; null until loaded, and the
   // review stays hidden if this Vibe has no review support

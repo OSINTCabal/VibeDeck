@@ -48,11 +48,10 @@ function groupByDay(sessions: Session[]): { label: string; items: Session[] }[] 
 }
 
 export function Sidebar({
-  lane, setLane, sessions, create, remove, health, collapsed, onToggleCollapse,
+  lane, setLane, sessions, remove, health, collapsed, onToggleCollapse,
 }: {
   lane: Lane; setLane: (l: Lane) => void;
   sessions: Session[];
-  create: ReturnType<typeof useSessions>["create"];
   remove: ReturnType<typeof useSessions>["remove"];
   health: ReturnType<typeof useHealth>;
   collapsed: boolean;
@@ -117,11 +116,9 @@ export function Sidebar({
   const loose = React.useMemo(() => visible.filter(s => !projectPaths.has(s.cwd)), [visible, projectPaths]);
   const groups = React.useMemo(() => groupByDay(loose), [loose]);
 
-  const newSession = async () => {
-    // cwd defaults to the user's home on the backend
-    const s = await create({ cwd: "", lane });
-    navigate(`/sessions/${s.id}`);
-  };
+  // The welcome screen creates the session with the first message, so an
+  // unused "New session" leaves nothing behind.
+  const newSession = () => navigate("/");
 
   const user = health?.user || "user";
 

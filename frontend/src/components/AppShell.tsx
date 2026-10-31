@@ -5,6 +5,7 @@ import { SignInConfirmation } from "./SignInConfirmation";
 import { Sidebar } from "./Sidebar";
 import { TitleBar } from "./TitleBar";
 import { CommandPalette } from "./CommandPalette";
+import { Backdrop } from "./Backdrop";
 import { Button, Spinner } from "./ui";
 import { useSessions, useHealth, useAppConfig, normalizeLane } from "@/hooks/useSessions";
 import type { Lane } from "@/lib/types";
@@ -25,7 +26,7 @@ export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const inWorkspace = location.pathname.startsWith("/workspace/");
-  const { sessions, create, remove, loading, error } = useSessions();
+  const { sessions, remove, loading, error } = useSessions();
   const health = useHealth();
   const { config } = useAppConfig();
   const [welcome, setWelcome] = React.useState(false);
@@ -103,7 +104,6 @@ export function AppShell() {
           lane={lane}
           setLane={switchLane}
           sessions={sessions}
-          create={create}
           remove={remove}
           health={health}
           collapsed={collapsed}
@@ -130,16 +130,19 @@ export function AppShell() {
               <Settings size={16} />
             </button>
           )}
-          <React.Suspense fallback={<div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-text-muted"><Spinner />Loading...</div>}>
-            <Outlet context={{ lane, sessions, health, config, loading, error }} />
-          </React.Suspense>
+          {/* full on the welcome screen, calmer behind pages with content */}
+          <Backdrop fallback={location.pathname === "/" ? "idle" : "page"} />
+          <div className="relative h-full">
+            <React.Suspense fallback={<div role="status" className="flex h-full items-center justify-center gap-2 text-sm text-text-muted"><Spinner />Loading...</div>}>
+              <Outlet context={{ lane, sessions, health, config, loading, error }} />
+            </React.Suspense>
+          </div>
         </main>
       </div>
       {!inWorkspace && <CommandPalette
         lane={lane}
         setLane={switchLane}
         sessions={sessions}
-        create={create}
         onToggleSidebar={() => setCollapsed((c) => !c)}
       />}
       {welcome && <dialog ref={welcomeRef} aria-labelledby="mistral-welcome-title" onCancel={event => { event.preventDefault(); dismissWelcome(); }} className="w-[calc(100%_-_2rem)] max-w-md rounded-xl border border-border bg-surface-raised p-6 text-text shadow-lg backdrop:bg-black/70">

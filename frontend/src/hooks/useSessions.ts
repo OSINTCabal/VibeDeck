@@ -1,5 +1,5 @@
 import { useCallback, useRef, useEffect, useState } from "react";
-import { listSessions, createSession, deleteSession, getHealth, getConfig } from "@/lib/api";
+import { listSessions, deleteSession, getHealth, getConfig } from "@/lib/api";
 import type { Session, Lane, Health, AppConfig } from "@/lib/types";
 
 export const LANE_AGENT: Record<Lane, string> = {
@@ -53,25 +53,12 @@ export function useSessions() {
     return () => { clearInterval(t); window.removeEventListener("vibedeck:sessions", changed); };
   }, [refresh]);
 
-  const create = useCallback(async (opts: {
-    cwd: string; lane: Lane; agent?: string; model?: string; title?: string;
-  }) => {
-    const s = await createSession({
-      cwd: opts.cwd, lane: opts.lane,
-      agent: opts.agent || (opts.lane === "work" ? LANE_AGENT.work : undefined),
-      model: opts.model,
-      title: opts.title,
-    });
-    await refresh();
-    return s;
-  }, [refresh]);
-
   const remove = useCallback(async (id: string) => {
     await deleteSession(id);
     setSessions((prev) => prev.filter((s) => s.id !== id));
   }, []);
 
-  return { sessions, loading, error, refresh, create, remove, setSessions };
+  return { sessions, loading, error, refresh, remove, setSessions };
 }
 
 export function useHealth() {

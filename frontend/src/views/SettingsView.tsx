@@ -10,6 +10,7 @@ import { ProvidersSection } from "@/components/ProvidersSection";
 import { VibeReleaseNotes } from "@/components/VibeReleaseNotes";
 import { WorktreesCard } from "@/components/WorktreesCard";
 import { THEMES, getTheme, setTheme, type ThemeId } from "@/lib/theme";
+import { BACKDROPS, setBackdrop, useBackdrop } from "@/lib/backdrop";
 import {
   notificationsEnabled, setNotificationsEnabled, notificationsSupported,
 } from "@/lib/notifications";
@@ -240,6 +241,7 @@ export function SettingsView() {
         <CardBody className="space-y-4">
           <div className="text-xs font-medium text-text-muted">Appearance</div>
           <ThemePicker />
+          <BackdropPicker />
           <ZoomControl />
           <div className="flex items-center justify-between">
             <div>
@@ -393,6 +395,29 @@ function ThemePicker() {
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- background picker
+
+function BackdropPicker() {
+  const current = useBackdrop();
+  return (
+    <div>
+      <div className="text-xs font-medium text-text-muted">Background</div>
+      <p className="mt-0.5 mb-1.5 text-xs text-text-faint">Animated, behind the app. It calms down once a chat has messages and livens up while the model works.</p>
+      <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Background">
+        {BACKDROPS.map(b => (
+          <button key={b.id} type="button" role="radio" aria-checked={current === b.id} title={b.description}
+            onClick={() => setBackdrop(b.id)}
+            className={cn("inline-flex h-8 items-center gap-1 rounded-md border px-2.5 text-xs transition-colors",
+              current === b.id ? "border-primary text-text ring-1 ring-primary" : "border-border text-text-muted hover:border-border-strong hover:text-text")}>
+            {b.name}
+            {current === b.id && <Check size={11} className="text-primary" />}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
