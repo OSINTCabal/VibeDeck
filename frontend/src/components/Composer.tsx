@@ -1,4 +1,5 @@
 import * as React from "react";
+import { DictationButton } from "./DictationButton";
 import { ArrowUp, ListPlus, Loader2, Plus, Square, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AgentPicker, EffortPicker, ModelPicker } from "./Pickers";
@@ -257,6 +258,9 @@ export function Composer({
           <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} onCompact={onCompact} />
           {onReasoningChange && <EffortPicker model={model} value={reasoning ?? null} onChange={onReasoningChange} />}
           <ModelPicker value={model} onChange={onModelChange} />
+          <DictationButton disabled={disabled}
+            onText={t => { const v = valueRef.current; onChange(v.trim() ? `${v.trimEnd()} ${t}` : t); setError(null); taRef.current?.focus(); }}
+            onError={setError} />
           {running && canQueue && (value.trim() || images.length > 0) && (
             <button
               type="button"

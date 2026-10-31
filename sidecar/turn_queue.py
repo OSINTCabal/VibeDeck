@@ -25,6 +25,11 @@ class QueueReq(BaseModel):
     request_id: str = Field(default_factory=lambda: uuid.uuid4().hex, alias="requestId", max_length=128)
 
 
+class LoopReq(BaseModel):
+    interval: str = Field(pattern=r"^\d+[smhd]$", max_length=8)
+    prompt: str = Field(min_length=1, max_length=4000)
+
+
 class SteerReq(BaseModel):
     expected_turn_id: str = Field(alias="expectedTurnId", min_length=1)
 
@@ -86,3 +91,23 @@ def queue_event(params: dict) -> Optional[dict]:
     """SSE event for a ``turn/queueUpdated`` notification."""
     queue = params.get("queue")
     return {"kind": "queue", "queue": queue} if isinstance(queue, dict) else None
+
+
+# ---- loops: a prompt Vibe sends again on an interval while the session is open
+
+@router.get("/api/sessions/{sid}/loops")
+async def list_loops(sid: str) -> dict:
+    return {"loops": ((await session_call(sid, "loops/list"))[2] or {}).get("loops", [])}
+
+
+@router.post("/api/sessions/{sid}/loops")
+async def create_loop(sid: str, r: LoopReq) -> dict:
+    """``interval`` like ``10m``; the first run is one interval from now."""
+    await session_call(sid, "loops/create", {"interval": r.interval, "prompt": r.prompt})
+    return await list_loops(sid)
+
+
+@router.delete("/api/sessions/{sid}/loops/{loop_id}")
+async def delete_loop(sid: str, loop_id: str) -> dict:
+    await session_call(sid, "loops/delete", {"loopId": loop_id})
+    return await list_loops(sid)

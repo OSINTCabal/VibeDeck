@@ -407,3 +407,50 @@ export const runShell = (sid: string, command: string) =>
   http<{ operationId: string }>(`/api/sessions/${sid}/shell`, { method: "POST", body: JSON.stringify({ command }) });
 export const interruptShell = (sid: string, operationId: string) =>
   http<{ ok: boolean }>(`/api/sessions/${sid}/shell/${encodeURIComponent(operationId)}/interrupt`, { method: "POST" });
+
+// ---------------------------------------------------------------- MCP, connectors, skill registry
+
+export interface McpSource {
+  name: string; displayName: string; kind: "server" | "connector"; transport: string;
+  status: "connected" | "needs_auth" | "disabled" | "unavailable" | "connecting" | "failed" | string;
+  tools: { name: string; disabled?: boolean }[]; error?: string | null;
+}
+export interface McpState { sources: McpSource[]; manageConnectorsUrl?: string | null; connectorError?: string | null }
+const post = <T,>(path: string, body: unknown) => http<T>(path, { method: "POST", body: JSON.stringify(body) });
+export const getMcpSources = () => http<McpState>("/api/extensions/mcp");
+export const refreshMcp = () => post<McpState>("/api/extensions/mcp/refresh", {});
+export const toggleMcp = (name: string, source: McpSource["kind"], disabled: boolean) =>
+  post<McpState>("/api/extensions/mcp/toggle", { name, source, disabled });
+export const addMcp = (body: { name?: string; transport: string; url?: string; command?: string; args?: string[] }) =>
+  post<McpState & { name: string; created: boolean }>("/api/extensions/mcp/add", body);
+export const removeMcp = (name: string) => post<McpState>("/api/extensions/mcp/remove", { name });
+export const loginMcp = (name: string, source: McpSource["kind"]) => post<{ url: string | null }>("/api/extensions/mcp/login", { name, source });
+export const logoutMcp = (name: string) => post<McpState>("/api/extensions/mcp/logout", { name });
+
+export interface SkillRegistry {
+  catalog: { name: string; skillId: string; description: string; latestVersion: number }[];
+  updates: Record<string, number>;
+  authenticated: boolean;
+  installed: { name: string; description: string; enabled: boolean; source?: string; version?: number | null; skillId?: string | null }[];
+}
+export const getSkillRegistry = () => http<SkillRegistry>("/api/extensions/skills");
+export const installSkill = (skillId: string) => post<SkillRegistry>("/api/extensions/skills/install", { skillId });
+export const updateSkill = (name: string) => post<SkillRegistry>("/api/extensions/skills/update", { name });
+export const setSkillEnabled = (name: string, enabled: boolean) => post<SkillRegistry>("/api/extensions/skills/enabled", { name, enabled });
+export const removeSkill = (name: string) => post<SkillRegistry>("/api/extensions/skills/remove", { name });
+
+// ---------------------------------------------------------------- loops and dictation
+
+export interface SessionLoop { id: string; prompt: string; intervalSeconds?: number | null; cron?: string | null; nextFireAt: number }
+export const getLoops = (sid: string) => http<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops`);
+export const createLoop = (sid: string, interval: string, prompt: string) => post<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops`, { interval, prompt });
+export const deleteLoop = (sid: string, loopId: string) =>
+  http<{ loops: SessionLoop[] }>(`/api/sessions/${sid}/loops/${encodeURIComponent(loopId)}`, { method: "DELETE" });
+export const transcribe = async (audio: Blob, language = navigator.language) => {
+  const res = await fetch(BASE + `/api/voice/transcribe?language=${encodeURIComponent(language)}`, {
+    method: "POST", headers: { "Content-Type": audio.type || "audio/webm" }, body: audio,
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.detail || `Dictation failed (${res.status})`);
+  return body as { text: string };
+};

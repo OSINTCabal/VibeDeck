@@ -50,6 +50,8 @@ class FakeBridge(VibeAppServer):
                 "eventId": 0, "history": [], "turns": [], "activeCallbacks": [], "childSessions": [],
                 "backgroundProcesses": [{"processId": "p1", "command": "npm run dev", "status": "running", "exitCode": None, "createdAt": "2026-10-31T10:00:00Z"}]}
             return {"state": copy.deepcopy(self.states[sid])}
+        if method == "skills/installed":
+            return {"skills": copy.deepcopy(FakeBridge.extensions.get("installed", [{"name": "local-one", "description": "d", "enabled": True}]))}
         if method in ("session/resume", "session/read"):
             if sid not in self.states:
                 raise BridgeError("not_found", "session not found")
@@ -106,6 +108,8 @@ class FakeBridge(VibeAppServer):
             return self._review(method, params)
         elif method.startswith("session/turn/"):
             return self._queue(method, params)
+        elif method.startswith(("mcp/", "connectors/", "skills/", "loops/")) and method not in ("skills/list", "skills/installed"):
+            return self._extensions(method, params)
         elif method == "session/subagents/read":
             return {"subagents": copy.deepcopy(FakeBridge.subagents)}
         elif method == "session/subagents/interrupt":
@@ -154,6 +158,59 @@ class FakeBridge(VibeAppServer):
                     "restoredPaths": [f"{self.cwd}/a.py"] if params.get("restoreFiles") else [],
                     "state": copy.deepcopy(self.states[sid]), "sessionLog": {}}
         return {}
+
+    # MCP sources, the skill registry and loops, shared by every bridge
+    extensions = {}
+
+    def _extensions(self, method, params):
+        ext = FakeBridge.extensions
+        sources = ext.setdefault("sources", [
+            {"name": "github", "displayName": "github", "kind": "server", "transport": "stdio", "status": "connected", "tools": [{"name": "search"}]},
+            {"name": "notion", "displayName": "Notion", "kind": "connector", "transport": "connector", "status": "needs_auth", "tools": []}])
+        skills = ext.setdefault("installed", [{"name": "local-one", "description": "d", "enabled": True}])
+        loops = ext.setdefault("loops", [])
+        if method == "mcp/read":
+            return {"mcp": {"sources": copy.deepcopy(sources)}}
+        if method == "mcp/toggle":
+            src = next(s for s in sources if s["name"] == params["name"])
+            src["status"] = "disabled" if params["disabled"] else "connected"
+            return {}
+        if method == "mcp/add":
+            name = params.get("name") or "added"
+            sources.append({"name": name, "displayName": name, "kind": "server", "transport": params["transport"], "status": "connecting", "tools": []})
+            ext["added"] = params
+            return {"name": name, "created": True}
+        if method == "mcp/remove":
+            ext["sources"] = [s for s in sources if s["name"] != params["name"]]
+            return {"name": params["name"], "removed": True}
+        if method == "mcp/login":
+            for q in list(self._subscribers):
+                q.put_nowait({"method": "mcp/authUrl", "params": {"name": params["name"], "url": "https://auth.example/" + params["name"]}})
+            return {}
+        if method == "mcp/logout":
+            return {}
+        if method == "connectors/auth/read":
+            return {"url": "https://mistral.example/connect/" + params["name"]}
+        if method == "skills/catalog":
+            return {"skills": [{"name": "reviewer", "skillId": "sk1", "description": "Reviews", "latestVersion": 2}],
+                    "updates": {"reviewer": 2} if any(s["name"] == "reviewer" for s in skills) else {}, "authenticated": True}
+        if method == "skills/import":
+            skills.append({"name": "reviewer", "description": "Reviews", "enabled": True, "skillId": params["skillId"], "version": 1})
+            return {}
+        if method in ("skills/setEnabled", "skills/setLatest", "skills/remove"):
+            ext.setdefault("skill_calls", []).append((method, params))
+            if method == "skills/remove":
+                ext["installed"] = [s for s in skills if s["name"] != params["name"]]
+            return {}
+        if method == "loops/list":
+            return {"loops": copy.deepcopy(loops)}
+        if method == "loops/create":
+            loops.append({"id": f"l{len(loops) + 1}", "prompt": params["prompt"], "intervalSeconds": 600, "nextFireAt": 1.0})
+            return {"loop": loops[-1]}
+        if method == "loops/delete":
+            ext["loops"] = [lp for lp in loops if lp["id"] != params["loopId"]]
+            return {"loop": {}}
+        raise BridgeError("method_not_found", f"Method not found: {method}")
 
     def _queue(self, method, params):
         """A turn queue: enqueue starts at once when idle, otherwise waits."""

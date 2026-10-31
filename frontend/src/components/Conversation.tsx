@@ -1,9 +1,10 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { Activity as ActivityIcon, AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, FolderTree, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
+import { Activity as ActivityIcon, AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, FolderTree, GitFork, Loader2, Repeat, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
+import { LoopsDialog } from "./LoopsDialog";
 import { BranchPicker } from "./BranchPicker";
 import { ActivityPanel } from "./ActivityPanel";
 import { QueueBar } from "./QueueBar";
@@ -29,6 +30,7 @@ export function Conversation({ session }: { session: Session }) {
   const [sendError, setSendError] = React.useState<string | null>(null);
   const [handoff, setHandoff] = React.useState<string | null>(null);
   const [cloudOpen, setCloudOpen] = React.useState(false);
+  const [loopsOpen, setLoopsOpen] = React.useState(false);
   const [warnings, setWarnings] = React.useState<string[]>(session.warnings ?? []);
   const [model, setModel] = React.useState(session.model || "");
   const [agent, setAgent] = React.useState(session.agent || "");
@@ -273,6 +275,7 @@ export function Conversation({ session }: { session: Session }) {
               items={[
                 { label: "Rename", icon: Pencil, onSelect: () => setRenameRequest(n => n + 1) },
                 { label: "Fork session", icon: GitFork, onSelect: () => void fork(), disabled: running },
+                { label: "Repeat a prompt…", icon: Repeat, onSelect: () => setLoopsOpen(true) },
                 { label: "Continue in the cloud", icon: Cloud, onSelect: () => setCloudOpen(true), disabled: running },
                 { label: "Continue in the vibe CLI", icon: Terminal, onSelect: () => void handoffToCli(), disabled: running },
                 { label: "Copy session ID", icon: Copy, onSelect: () => void navigator.clipboard?.writeText(session.id).catch(() => {}) },
@@ -291,6 +294,7 @@ export function Conversation({ session }: { session: Session }) {
           <Cloud size={16} />
         </button>
         <CloudDialog sessionId={session.id} open={cloudOpen} onClose={() => setCloudOpen(false)} />
+        <LoopsDialog sessionId={session.id} open={loopsOpen} onClose={() => setLoopsOpen(false)} />
         {reviewSupported && (
           <button
             onClick={() => togglePanel("changes")}

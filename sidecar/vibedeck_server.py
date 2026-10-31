@@ -33,6 +33,7 @@ from typing import Any, Literal, Optional
 from weakref import WeakValueDictionary
 
 import cloud_teleport
+import extensions
 import git_projects
 import httpx
 import processes
@@ -41,6 +42,7 @@ import review
 import session_rpc
 import turn_queue
 import vibe_install
+import voice
 import worktrees
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
@@ -86,6 +88,7 @@ from vibe_bridge import (
     REASONING_LEVELS,
     BridgeError,
     SessionManager,
+    VibeAppServer,
     find_app_server,
     valid_reasoning,
 )
@@ -325,6 +328,7 @@ async def _ensure_bridge(sid: str) -> tuple[Any, str]:
 
 # looked up per call so tests can patch _ensure_bridge
 session_rpc.configure(lambda sid: _ensure_bridge(sid))
+extensions.configure(lambda cwd: VibeAppServer(cwd=cwd, stderr_log=LOG_DIR / "appserver-catalog.log"))
 worktrees.configure(lambda: vsync.host(), lambda: [r["cwd"] for r in store.list_sessions() if r.get("cwd")])
 
 
@@ -513,6 +517,7 @@ async def lifespan(_: FastAPI):
     yield
     reaper.cancel()
     await asyncio.gather(reaper, return_exceptions=True)
+    await extensions.shutdown()
     await manager.close_all()
     await codex_provider.close()
     taps = list(_taps.values())
@@ -538,6 +543,8 @@ app.include_router(review.router)
 app.include_router(turn_queue.router)
 app.include_router(worktrees.router)
 app.include_router(processes.router)
+app.include_router(extensions.router)
+app.include_router(voice.router)
 
 
 @app.middleware("http")
