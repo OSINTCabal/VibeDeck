@@ -17,7 +17,7 @@ test('one focus refresh coalesces picker requests and stale responses cannot res
   const code = ts.transpileModule(fs.readFileSync(path.join(__dirname, '../src/components/Pickers.tsx'), 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;
-  new Function('require', 'exports', code)(id => id === 'react' ? react : id === '@/lib/api' ? api : id === '@/lib/utils' ? {} : require(id), exports);
+  new Function('require', 'exports', code)(id => id === 'react' ? react : id === '@/lib/api' ? api : id === '@/lib/utils' ? {} : id === './ModelIcon' || id === './ui' ? {} : require(id), exports);
   const cleanups = [];
   const mount = hook => { hook(); cleanups.push(effects.shift()()); };
   const tick = () => new Promise(resolve => setImmediate(resolve));

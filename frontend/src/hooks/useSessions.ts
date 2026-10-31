@@ -17,6 +17,10 @@ export function normalizeLane(lane: string): Lane {
   return lane === "code" ? "code" : "work";
 }
 
+function sameJson(a: unknown, b: unknown): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
 export function useSessions() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,7 +29,10 @@ export function useSessions() {
   const refresh = useCallback(async () => {
     try {
       const d = await listSessions();
-      setSessions(d.sessions.map((s) => ({ ...s, lane: normalizeLane(s.lane) })));
+      const next = d.sessions.map((s) => ({ ...s, lane: normalizeLane(s.lane) }));
+      // Polls usually return the same list; keep the old array so the shell
+      // and everything under it skip a re-render.
+      setSessions(prev => sameJson(prev, next) ? prev : next);
       setError(null);
     } catch (e) {
       setError(String(e));
@@ -66,8 +73,9 @@ export function useSessions() {
 export function useHealth() {
   const [health, setHealth] = useState<Health | null>(null);
   useEffect(() => {
-    getHealth().then(setHealth).catch(() => setHealth(null));
-    const t = setInterval(() => { if (!document.hidden) getHealth().then(setHealth).catch(() => {}); }, 30000);
+    const keep = (next: Health) => setHealth(prev => sameJson(prev, next) ? prev : next);
+    getHealth().then(keep).catch(() => setHealth(null));
+    const t = setInterval(() => { if (!document.hidden) getHealth().then(keep).catch(() => {}); }, 30000);
     return () => clearInterval(t);
   }, []);
   return health;

@@ -55,6 +55,9 @@ export interface VibeModelInfo {
   name: string;
   supportsImages: boolean;
   thinkingLevels: string[];
+  maxContextLength?: number | null;
+  autoCompactThreshold?: number | null;
+  thinking?: string | null;
 }
 
 export interface Health {
@@ -66,7 +69,20 @@ export interface Health {
   default_model: string;
   default_agent: string;
   version: string;
+  vibe?: VibeInstall;
   user?: string;
+}
+
+/** The installed Vibe CLI and whether it is older than VibeDeck expects. */
+export interface VibeInstall {
+  version: string | null;
+  recommended: string;
+  outdated: boolean;
+  upgradeCommand: string;
+}
+
+export interface VibeReleaseNotes extends VibeInstall {
+  notes: { version: string; markdown: string }[];
 }
 
 /** Where the effective Mistral API key comes from — never includes the key itself. */
@@ -135,7 +151,7 @@ export interface SessionStats {
 export type SseEvent =
   | { kind: "snapshot"; session: any; activeCallbacks: HistoryEntry[]; lastEventId: number;
       history?: HistoryEntry[]; turns?: Turn[]; childSessions?: ChildSession[];
-      historyBeforeCursor?: string | null; stats?: SessionStats }
+      historyBeforeCursor?: string | null; stats?: SessionStats; turnQueue?: TurnQueue }
   | { kind: "entry"; action: "add"; entry: HistoryEntry }
   | { kind: "entry"; action: "update"; entryId: string; patch: JsonPatchOp[]; entry?: HistoryEntry }
   | { kind: "turn"; status: "started" | "completed"; turn: Turn }
@@ -144,8 +160,16 @@ export type SseEvent =
   | { kind: "session"; sessionId: string; patch: JsonPatchOp[] }
   | { kind: "callback"; callback: HistoryEntry }
   | { kind: "childSession"; childSession: any }
+  | { kind: "queue"; queue: TurnQueue }
   | { kind: "error"; error: string }
   | { kind: "raw"; method: string; params: any };
+
+/** Messages waiting to run after the current turn (Vibe's turn queue). */
+export interface TurnQueue {
+  items: { id: string; createdAt: number; entries: { role: string; content: ContentBlock[] }[] }[];
+  paused: boolean;
+  maxItems?: number;
+}
 
 export interface JsonPatchOp {
   op: "add" | "replace" | "append" | "remove";
@@ -161,6 +185,9 @@ export interface ModelInfo {
   functionCalling: boolean;
   vision: boolean;
   ownedBy: string;
+  /** Reasoning levels the vibe CLI accepts for this model, and its default. */
+  thinkingLevels?: string[];
+  defaultThinking?: string | null;
 }
 
 export interface SkillInfo {

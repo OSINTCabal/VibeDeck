@@ -1,33 +1,38 @@
+/** Rows of Mistral's pixel "M", top to bottom: colour and [column, width] runs. */
+const ROWS: [string, [number, number][]][] = [
+  ["#FFAF01", [[1, 1], [5, 1]]],
+  ["#FF8204", [[1, 2], [4, 2]]],
+  ["#FA500F", [[1, 5]]],
+  ["#E51300", [[1, 1], [3, 1], [5, 1]]],
+  ["#C4001D", [[0, 3], [4, 3]]],
+];
+
 /**
- * Mistral's pixel mark in the orange used by Vibe's web interface.
+ * Mistral's pixel mark, drawn in the official gradient (yellow to red, top
+ * to bottom) as the brand guidelines prefer. `mono` renders it in one colour
+ * from the `fill-*` class instead, for use on a coloured badge.
  */
 export function MistralLogo({
-  size = 24, className,
+  size = 24, className, mono = false,
 }: {
   size?: number;
   className?: string;
+  mono?: boolean;
 }) {
   return (
     <svg
       width={size}
-      height={Math.round(size * (130 / 182))}
-      viewBox="26 26 182 130"
-      fill="#FF4A00"
+      height={Math.round(size * (5 / 7))}
+      viewBox="0 0 7 5"
       xmlns="http://www.w3.org/2000/svg"
+      shapeRendering="crispEdges"
       role="img"
       aria-label="Mistral"
       className={className}
     >
-      <rect x="52" y="26" width="26" height="26" />
-      <rect x="156" y="26" width="26" height="26" />
-      <rect x="52" y="52" width="52" height="26" />
-      <rect x="130" y="52" width="52" height="26" />
-      <rect x="52" y="78" width="130" height="26" />
-      <rect x="52" y="104" width="26" height="26" />
-      <rect x="104" y="104" width="26" height="26" />
-      <rect x="156" y="104" width="26" height="26" />
-      <rect x="26" y="130" width="78" height="26" />
-      <rect x="130" y="130" width="78" height="26" />
+      {ROWS.flatMap(([color, runs], y) => runs.map(([x, width]) => (
+        <rect key={`${x}-${y}`} x={x} y={y} width={width} height={1} fill={mono ? undefined : color} />
+      )))}
     </svg>
   );
 }

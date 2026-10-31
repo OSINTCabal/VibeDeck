@@ -180,7 +180,7 @@ function createWorkspace(getWindow) {
       };
       const authNotice = () => notify(connectorPage() ? 'connector-auth' : 'signin', connectorPage()
         ? 'This service needs browser authorization. Choose Connect services, finish setup, then return here.'
-        : 'Use Sign in to reconnect Mistral securely in Chrome.');
+        : 'Use Sign in to reconnect Mistral securely in Chrome or another Chromium browser.');
       const isolatedPage = url => {
         const origin = new URL(url).origin;
         if (origin === 'https://docs.mistral.ai') return 'docs';
