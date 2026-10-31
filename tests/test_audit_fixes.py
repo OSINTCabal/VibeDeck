@@ -47,39 +47,61 @@ def test_malformed_image_sources_never_reach_a_bridge(source, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_registry_refreshes_after_external_cli_edits(tmp_path, monkeypatch):
+    """Registry reads share the host bridge, which restarts when Vibe's
+    configuration changes, so an external CLI edit is picked up."""
+    import vibe_sessions
+    from fake_bridge import FakeBridge
     config = tmp_path / "config.toml"
     monkeypatch.setattr(providers, "vibe_config_path", lambda: config)
-    spawn = server.manager.spawn
-    spy = AsyncMock(side_effect=spawn)
-    monkeypatch.setattr(server.manager, "spawn", spy)
+    await server.manager.close(server.LISTER_KEY)
+    starts = []
+    monkeypatch.setattr(vibe_sessions, "VibeAppServer", lambda **kw: starts.append(kw) or FakeBridge(**kw))
     before = await server._read_vibe_models()
     await server._read_vibe_models()
-    assert spy.await_count == 1
+    assert len(starts) == 1
     providers.upsert_provider({"name": "local", "api_base": "http://localhost:11434/v1"}, config)
     providers.upsert_model({"name": "model-b", "alias": "audit-b", "provider": "local"}, config)
     after = await server._read_vibe_models()
     assert "audit-b" not in {m["id"] for m in before}
     assert "audit-b" in {m["id"] for m in after}
-    assert spy.await_count == 2
+    assert len(starts) == 2
+    # agents read from the same, still current bridge, then from the cache
     await server._read_agents()
     await server._read_agents()
-    assert spy.await_count == 3
+    assert len(starts) == 2
     (tmp_path / "agents").mkdir()
     (tmp_path / "agents" / "new.toml").write_text('name = "new"\n')
     await server._read_agents()
-    assert spy.await_count == 4
+    assert len(starts) == 3
+
+
+@pytest.mark.asyncio
+async def test_registry_survives_a_restart_until_the_config_changes(tmp_path, monkeypatch):
+    config = tmp_path / "config.toml"
+    monkeypatch.setattr(providers, "vibe_config_path", lambda: config)
+    providers.upsert_model({"name": "m", "alias": "saved-model", "provider": "mistral"}, config)
+    first = await server._read_vibe_models()
+    assert "saved-model" in {m["id"] for m in first}
+    # a new sidecar process: empty memory cache, no running app-server
+    server._vibe_models_cache = None
+    await server.manager.close(server.LISTER_KEY)
+    read = AsyncMock(side_effect=AssertionError("must not start Vibe"))
+    monkeypatch.setattr(server.vsync, "host", read)
+    assert await server._read_vibe_models() == first
+    # an in-process invalidation drops the saved copy too
+    server._invalidate_vibe_models()
+    assert server._saved_registry("models", server._registry_signature()) is None
 
 
 @pytest.mark.asyncio
 async def test_invalidation_during_registry_probe_cannot_restore_old_cache(monkeypatch):
-    bridge = await server.manager.spawn("/tmp")
+    bridge = await server.vsync.host(server._registry_signature())
     original = bridge.read_config
     async def read():
         data = await original()
         server._invalidate_vibe_models()
         return data
-    bridge.read_config = read
-    monkeypatch.setattr(server.manager, "spawn", AsyncMock(return_value=bridge))
+    monkeypatch.setattr(bridge, "read_config", read)
     assert await server._read_vibe_models()
     assert server._vibe_models_cache is None
 

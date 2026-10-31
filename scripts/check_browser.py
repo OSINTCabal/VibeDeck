@@ -160,6 +160,8 @@ async def run():
             else:
                 payload = {"items": [{"id": "library", "name": "Research library", "description": "Shared references", "documents": 3}] +
                            [{"id": "created-library", **entry, "documents": 0} for entry in library_saves]}
+        elif path == "/api/git/branches":
+            payload = {"current": "main", "branches": ["main"], "dirty": False, "isRepo": True}
         elif path == "/api/projects":
             payload = {"home": "/tmp", "known": [{"name": "Example project", "path": "/tmp/example"}], "recent": []}
         elif path == "/api/usage":
@@ -241,7 +243,7 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.get_by_role("button", name="Account", exact=True).click()
         await page.get_by_role("button", name="Mistral account", exact=True).click()
         account_dialog = page.get_by_role("dialog", name="Mistral account", exact=True)
-        assert await account_dialog.evaluate("e => getComputedStyle(e).animationName") == "vd-reveal"
+        assert await account_dialog.evaluate("e => getComputedStyle(e).animationName") == "vd-menu-in"
         await account_dialog.get_by_role("button", name="Sign in to Mistral", exact=True).click()
         await expect(account_dialog).not_to_be_visible()
         await page.get_by_role("button", name="Account", exact=True).click()
@@ -635,9 +637,31 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await page.goto(base)
         await page.get_by_role("button", name="Code", exact=True).click()
         await expect(page.get_by_role("button", name="Select agent", exact=True)).to_contain_text("Plan")
+        # Menus keep rows apart when a short window caps their height, and the
+        # composer toolbar fits a phone-width window.
+        await page.set_viewport_size({"width": 1000, "height": 520})
+        await page.get_by_role("button", name="Select agent", exact=True).click()
+        rows = page.get_by_role("menu").get_by_role("menuitemradio")
+        await expect(rows.first).to_be_visible()
+        await page.get_by_role("menu").evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
+        boxes = [await row.bounding_box() for row in await rows.all()]
+        assert all(a["y"] + a["height"] <= b["y"] + .5 for a, b in zip(boxes, boxes[1:])), ("Overlapping menu rows", boxes)
+        await page.keyboard.press("Escape")
+        await page.get_by_role("button", name="Select model", exact=True).click()
+        model_menu = page.get_by_role("menu")
+        await model_menu.evaluate("element => Promise.all(element.getAnimations().map(a => a.finished))")
+        assert await model_menu.evaluate("m => [...m.querySelectorAll('div')].every(e => e.scrollWidth <= e.clientWidth + 1)"), "Model menu scrolls sideways"
+        await page.keyboard.press("Escape")
+        await page.screenshot(path=str(artifacts / "agent-menu-short.png"))
+        await page.set_viewport_size({"width": 420, "height": 820})
+        await page.locator("aside").first.evaluate("e => Promise.all(e.getAnimations().map(a => a.finished)).then(() => new Promise(r => setTimeout(r, 250)))")
+        await page.screenshot(path=str(artifacts / "composer-narrow.png"))
+        toolbar = await page.locator("[data-vd-composer]").evaluate("e => { const bar = e.parentElement.lastElementChild; return [bar.scrollWidth, bar.clientWidth, bar.getBoundingClientRect().right, innerWidth]; }")
+        assert toolbar[0] <= toolbar[1] + 1 and toolbar[2] <= toolbar[3], ("Composer toolbar overflows", toolbar)
+        await page.set_viewport_size({"width": 1440, "height": 900})
         for mode in ("Full auto","Accept edits","Ask","Plan"):
             await page.get_by_role("button",name="Select agent",exact=True).click()
-            await page.get_by_role("button",name=mode,exact=True).click()
+            await page.get_by_role("menuitemradio",name=mode,exact=True).click()
             await expect(page.get_by_role("button",name="Select agent",exact=True)).to_contain_text(mode)
 
         await page.goto(base + "/settings")
@@ -674,18 +698,18 @@ window.vibedeck = { platform: "linux", getZoom: async () => Number(localStorage.
         await expect(page.get_by_role("alert")).to_contain_text("Fixture first message failed")
         await expect(page.get_by_role("button", name="Remove pixel.png", exact=True)).to_be_visible()
         await page.get_by_role("button", name="Select model", exact=True).click()
-        await page.get_by_role("button", name="audit-b", exact=False).click()
+        await page.get_by_role("menuitemradio", name="audit-b", exact=False).click()
         await page.get_by_role("button", name="Select agent", exact=True).click()
-        await page.get_by_role("button", name="Plan", exact=True).click()
+        await page.get_by_role("menuitemradio", name="Plan", exact=True).click()
         await page.get_by_role("button", name="Send", exact=True).click()
         await expect(page.get_by_role("alert")).to_contain_text("Fixture first message failed")
         assert len(session_creations) == 1 and len(turn_attempts) == 2
-        assert session_patches == [{"agent": "plan", "model": "audit-b"}]
+        assert session_patches == [{"agent": "plan", "model": "audit-b", "reasoning": None}], session_patches
         assert turn_attempts[0]["requestId"] == turn_attempts[1]["requestId"]
         assert turn_attempts[0]["images"] == turn_attempts[1]["images"]
         sessions[-1]["status"] = "unknown"
         await page.get_by_role("button", name="Select agent", exact=True).click()
-        await page.get_by_role("button", name="Ask", exact=True).click()
+        await page.get_by_role("menuitemradio", name="Ask", exact=True).click()
         await page.get_by_role("button", name="Send", exact=True).click()
         await expect(page.get_by_role("alert")).to_contain_text("become idle")
         assert len(turn_attempts) == 2

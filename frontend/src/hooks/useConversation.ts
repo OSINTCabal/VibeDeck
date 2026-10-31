@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getHistory, openSessionEvents, applyPatch } from "@/lib/api";
-import type { ChildSession, HistoryEntry, SessionStats, SseEvent } from "@/lib/types";
+import type { ChildSession, HistoryEntry, SessionStats, SseEvent, TurnQueue } from "@/lib/types";
 
 export interface ConversationState {
   entries: HistoryEntry[];
@@ -14,12 +14,13 @@ export interface ConversationState {
   error: string | null;
   lastEventId: number;
   historyBeforeCursor: string | null;
+  queue: TurnQueue | null;
 }
 
 export const initialConversation = (): ConversationState => ({
   entries: [], session: null, turnStatus: "idle", activeTurnId: null,
   stats: null, pendingCallbacks: [], childSessions: {},
-  loading: true, error: null, lastEventId: 0, historyBeforeCursor: null,
+  loading: true, error: null, lastEventId: 0, historyBeforeCursor: null, queue: null,
 });
 
 export function conversationEvent(s: ConversationState, ev: SseEvent): ConversationState {
@@ -47,6 +48,7 @@ export function conversationEvent(s: ConversationState, ev: SseEvent): Conversat
         childSessions: Object.fromEntries((ev.childSessions || []).map(c => [c.id, c])),
         stats: ev.stats ?? s.stats,
         historyBeforeCursor: ev.historyBeforeCursor ?? null,
+        queue: ev.turnQueue ?? null,
       };
       break;
     }
@@ -75,6 +77,7 @@ export function conversationEvent(s: ConversationState, ev: SseEvent): Conversat
         : [...s.entries, ev.callback];
       next.pendingCallbacks = next.entries.filter(e => e.type === "callback" && e.state?.status === "open");
       break;
+    case "queue": next.queue = ev.queue; break;
     case "childSession": next.childSessions = { ...s.childSessions, [ev.childSession.id]: ev.childSession }; break;
     case "error": next.error = ev.error; next.loading = false; break;
   }
@@ -88,6 +91,7 @@ export function useConversation(sessionId: string | undefined, released = false)
   stateRef.current = state;
   const disconnect = useRef<(() => void) | null>(null);
   const pageBusy = useRef(false);
+  const reconnect = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (released) return;
@@ -96,40 +100,45 @@ export function useConversation(sessionId: string | undefined, released = false)
     setState(initialConversation());
     pageBusy.current = false;
     if (!sessionId || released) return;
-    let closed = false;
-    let frame = 0;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let pending: SseEvent[] = [];
-    const flush = () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
-      frame = 0;
-      timer = undefined;
-      const events = pending;
-      pending = [];
-      if (!closed && events.length) setState(s => events.reduce(conversationEvent, s));
+    const connect = () => {
+      let closed = false;
+      let frame = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let pending: SseEvent[] = [];
+      const flush = () => {
+        cancelAnimationFrame(frame);
+        clearTimeout(timer);
+        frame = 0;
+        timer = undefined;
+        const events = pending;
+        pending = [];
+        if (!closed && events.length) setState(s => events.reduce(conversationEvent, s));
+      };
+      document.addEventListener("visibilitychange", flush);
+      const close = openSessionEvents(sessionId, ev => {
+        if (closed) return;
+        if (ev.kind === "turn" && ev.status !== "started") window.dispatchEvent(new Event("vibedeck:usage-refresh"));
+        pending.push(ev);
+        if (document.hidden || pending.length >= 128 || ev.kind === "callback" ||
+            (ev.kind === "turn" && ev.status !== "started")) flush();
+        else if (!frame) {
+          frame = requestAnimationFrame(flush);
+          timer = setTimeout(flush, 100);
+        }
+      });
+      disconnect.current = () => {
+        closed = true;
+        close();
+        cancelAnimationFrame(frame);
+        clearTimeout(timer);
+        document.removeEventListener("visibilitychange", flush);
+        pending = [];
+      };
     };
-    document.addEventListener("visibilitychange", flush);
-    const close = openSessionEvents(sessionId, ev => {
-      if (closed) return;
-      if (ev.kind === "turn" && ev.status !== "started") window.dispatchEvent(new Event("vibedeck:usage-refresh"));
-      pending.push(ev);
-      if (document.hidden || pending.length >= 128 || ev.kind === "callback" ||
-          (ev.kind === "turn" && ev.status !== "started")) flush();
-      else if (!frame) {
-        frame = requestAnimationFrame(flush);
-        timer = setTimeout(flush, 100);
-      }
-    });
-    disconnect.current = () => {
-      closed = true;
-      close();
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", flush);
-      pending = [];
-    };
-    return () => { disconnect.current?.(); disconnect.current = null; };
+    connect();
+    // a fresh stream starts with a snapshot that replaces the history
+    reconnect.current = () => { disconnect.current?.(); connect(); };
+    return () => { disconnect.current?.(); disconnect.current = null; reconnect.current = null; };
   }, [sessionId, released]);
 
   const loadEarlier = useCallback(async () => {
@@ -151,5 +160,6 @@ export function useConversation(sessionId: string | undefined, released = false)
 
   // Returning an empty state immediately prevents one render with another session's turn ID.
   const current = identity.current === sessionId ? state : initialConversation();
-  return { ...current, loadEarlier, disconnect: () => disconnect.current?.() };
+  const resync = useCallback(() => reconnect.current?.(), []);
+  return { ...current, loadEarlier, resync, disconnect: () => disconnect.current?.() };
 }
