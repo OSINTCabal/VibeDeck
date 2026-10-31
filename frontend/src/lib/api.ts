@@ -73,7 +73,8 @@ export const removeProviderModel = (name: string, alias: string) =>
 
 // ---------------------------------------------------------------- sessions
 
-export const listSessions = () => http<{ sessions: Session[] }>("/api/sessions");
+/** ``syncing``: the merge with the vibe CLI's sessions is still running; ask again shortly. */
+export const listSessions = () => http<{ sessions: Session[]; syncing?: boolean }>("/api/sessions");
 export const createSession = (body: {
   cwd: string; agent?: string; model?: string; reasoning?: string; lane?: string; title?: string;
 }) => http<Session>("/api/sessions", { method: "POST", body: JSON.stringify(body) });

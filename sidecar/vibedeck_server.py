@@ -328,6 +328,7 @@ async def _ensure_bridge(sid: str) -> tuple[Any, str]:
 
 # looked up per call so tests can patch _ensure_bridge
 session_rpc.configure(lambda sid: _ensure_bridge(sid))
+vsync.config_signature = lambda: _registry_signature()
 extensions.configure(lambda cwd: VibeAppServer(cwd=cwd, stderr_log=LOG_DIR / "appserver-catalog.log"))
 worktrees.configure(lambda: vsync.host(), lambda: [r["cwd"] for r in store.list_sessions() if r.get("cwd")])
 
@@ -490,8 +491,8 @@ async def _reap_idle_bridges() -> None:
                         await manager.close(sid)
                         await _stop_tap(sid)
                         continue
-                    if bridge.has_ui_subscribers:
-                        continue
+                    if bridge.has_ui_subscribers or sid == LISTER_KEY:
+                        continue  # the host bridge serves listings and registries
                     if time.time() - bridge.last_activity < _IDLE_REAP_SECONDS:
                         continue
                     row = store.get_session(sid)
@@ -506,6 +507,15 @@ async def _reap_idle_bridges() -> None:
             pass  # reaping is best-effort; never kill the loop
 
 
+async def _prewarm() -> None:
+    try:
+        await asyncio.gather(vsync.refresh(), _read_vibe_models(), _read_agents(), return_exceptions=True)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        pass
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     store.audit("boot", f"vibedeck sidecar on :{PORT}")
@@ -514,7 +524,12 @@ async def lifespan(_: FastAPI):
     except (ValueError, OSError):
         store.audit("agents.setup_failed", "Check Subagents in Settings → Config to finish setup.")
     reaper = asyncio.create_task(_reap_idle_bridges())
+    # start Vibe while the window opens: the first screen needs the session
+    # list and the model and agent registries
+    prewarm = asyncio.create_task(_prewarm())
     yield
+    prewarm.cancel()
+    await asyncio.gather(prewarm, return_exceptions=True)
     reaper.cancel()
     await asyncio.gather(reaper, return_exceptions=True)
     await extensions.shutdown()
@@ -626,11 +641,33 @@ async def delete_api_key() -> dict:
 # ---- providers (multi-provider: add any AI provider, use its models freely
 # or via provider-pinned subagents; keys live in the system keyring)
 
+# The model and agent registries survive restarts: a launch with the same
+# Vibe configuration files (and app-server binary) shows them at once instead
+# of waiting for an app-server to start.
+def _registry_files(signature: tuple) -> str:
+    return json.dumps(signature[1:], default=str)
+
+
+def _saved_registry(kind: str, signature: tuple) -> Optional[list[dict]]:
+    if _registry_generation:
+        return None  # invalidated in this process: only a live read will do
+    saved = store.get_config(f"vibe_registry_{kind}", None)
+    if isinstance(saved, dict) and saved.get("files") == _registry_files(signature) and saved.get("items"):
+        return saved["items"]
+    return None
+
+
+def _save_registry(kind: str, signature: tuple, items: list[dict]) -> None:
+    store.set_config(f"vibe_registry_{kind}", {"files": _registry_files(signature), "items": items})
+
+
 def _invalidate_vibe_models() -> None:
     """Provider/model changes alter the app-server's model registry."""
     global _vibe_models_cache, _registry_generation
     _vibe_models_cache = None
     _registry_generation += 1
+    for kind in ("models", "agents"):
+        store.set_config(f"vibe_registry_{kind}", None)
 
 
 @app.get("/api/providers")
@@ -923,6 +960,7 @@ _vibe_models_cache: Optional[list[dict]] = None
 _vibe_models_lock = asyncio.Lock()
 _vibe_models_signature: Optional[tuple] = None
 _registry_generation = 0
+_session_sync: Optional[asyncio.Task] = None
 _observed_registry_signature: Optional[tuple] = None
 
 
@@ -960,29 +998,32 @@ async def _fetch_vibe_models() -> list[dict]:
     signature = _registry_signature()
     if _vibe_models_cache is not None and signature == _vibe_models_signature:
         return _vibe_models_cache
+    saved = _saved_registry("models", signature)
+    if saved:
+        _vibe_models_cache, _vibe_models_signature = saved, signature
+        return saved
     out: list[dict] = []
     try:
-        bridge = await manager.spawn(str(Path.home()), key="vibe-models-probe")
-        try:
-            cfg = await bridge.read_config()
-            for m in (cfg.get("config", {}) or {}).get("models", []) or []:
-                alias = m.get("alias") or m.get("name")
-                if alias:
-                    out.append({
-                        "id": alias,
-                        "name": m.get("displayName") or alias,
-                        "supportsImages": bool(m.get("supportsImages")),
-                        "thinkingLevels": m.get("thinkingLevels") or [],
-                        "thinking": m.get("thinking"),
-                        "maxContextLength": m.get("maxContextLength"),
-                        "autoCompactThreshold": m.get("autoCompactThreshold"),
-                    })
-        finally:
-            await bridge.close()
+        bridge = await vsync.host(signature)
+        cfg = await bridge.read_config()
+        for m in (cfg.get("config", {}) or {}).get("models", []) or []:
+            alias = m.get("alias") or m.get("name")
+            if alias:
+                out.append({
+                    "id": alias,
+                    "name": m.get("displayName") or alias,
+                    "supportsImages": bool(m.get("supportsImages")),
+                    "thinkingLevels": m.get("thinkingLevels") or [],
+                    "thinking": m.get("thinking"),
+                    "maxContextLength": m.get("maxContextLength"),
+                    "autoCompactThreshold": m.get("autoCompactThreshold"),
+                })
     except Exception:
         out = []
     _vibe_models_cache = (out or None) if signature == _registry_signature() else None
     _vibe_models_signature = signature
+    if _vibe_models_cache:
+        _save_registry("models", signature, out)
     return out
 
 
@@ -1004,25 +1045,28 @@ async def _fetch_agents(refresh: bool = False) -> list[dict]:
     signature = _registry_signature()
     if _agents_cache is not None and not refresh and signature == _agents_signature:
         return _agents_cache
+    saved = None if refresh else _saved_registry("agents", signature)
+    if saved:
+        _agents_cache, _agents_signature = saved, signature
+        return saved
     out: list[dict] = []
     try:
-        bridge = await manager.spawn(str(Path.home()), key="agents-probe")
-        try:
-            data = await bridge.list_agents()
-            for a in (data.get("agents") or []):
-                out.append({
-                    "name": a.get("name", ""),
-                    "displayName": a.get("displayName") or a.get("name", ""),
-                    "description": a.get("description") or "",
-                    "safety": a.get("safety") or "",
-                    "agentType": a.get("agentType") or "agent",
-                })
-        finally:
-            await bridge.close()
+        bridge = await vsync.host(signature)
+        data = await bridge.list_agents()
+        for a in (data.get("agents") or []):
+            out.append({
+                "name": a.get("name", ""),
+                "displayName": a.get("displayName") or a.get("name", ""),
+                "description": a.get("description") or "",
+                "safety": a.get("safety") or "",
+                "agentType": a.get("agentType") or "agent",
+            })
     except Exception:
         out = []
     _agents_cache = (out or None) if signature == _registry_signature() else None
     _agents_signature = signature
+    if _agents_cache:
+        _save_registry("agents", signature, out)
     return out
 
 
@@ -1157,14 +1201,20 @@ async def create_session(s: SessionCreate) -> dict:
 
 @app.get("/api/sessions")
 async def list_sessions() -> dict:
-    # pick up vibe CLI sessions (and external renames/activity) from the
-    # shared session store; never let a listing failure break the sidebar
-    try:
-        await vsync.sync(live_sids=_live_sids())
-    except Exception:
-        pass
+    """VibeDeck's sessions, merged with the vibe CLI's shared store.
+
+    The merge needs a running app-server, which takes seconds to start on a
+    cold launch: when it is not done shortly, the rows already known are
+    returned with ``syncing`` and the client asks again. A listing failure
+    never breaks the sidebar.
+    """
+    global _session_sync
+    if _session_sync is None or _session_sync.done():
+        _session_sync = asyncio.create_task(vsync.sync(live_sids=_live_sids()))
+        _session_sync.add_done_callback(lambda t: t.cancelled() or t.exception())
+    done, _ = await asyncio.wait({_session_sync}, timeout=0.5)
     rows = store.list_sessions_with_costs()
-    return {"sessions": [_public_session(r) for r in rows]}
+    return {"sessions": [_public_session(r) for r in rows], "syncing": not done}
 
 
 @app.get("/api/sessions/{sid}")
