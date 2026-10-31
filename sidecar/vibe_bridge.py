@@ -29,10 +29,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import time
 from pathlib import Path
 from typing import Any, Optional
+
+from turn_input import message_blocks
 
 # Default model for vibecoding / general use. mistral-large-4 is Mistral's current
 # flagship: largest context window (512k), vision, function calling, top reasoning.
@@ -42,8 +45,15 @@ DEFAULT_AGENT = "accept-edits"
 # Desktop agent modes; Plan is installed as a read-only profile on Vibe 3.
 AGENT_MODES = ("ask", "plan", "accept-edits", "auto-approve")
 
-# Reasoning / thinking levels accepted by config/model/write.
+# Standard reasoning / thinking levels. Since Vibe 3.0.4 a model's
+# thinking_levels may list levels of its own (e.g. "turbo", "minimal"), which
+# config/model/write sends to the provider as written.
 REASONING_LEVELS = ("off", "low", "medium", "high", "max")
+_REASONING_WORD = re.compile(r"[a-z][a-z0-9_-]{0,31}")
+
+
+def valid_reasoning(level: str) -> bool:
+    return level in REASONING_LEVELS or bool(_REASONING_WORD.fullmatch(level))
 
 # Approval decision types (ApprovalDecisionType StrEnum, lowercased names).
 APPROVAL_DECISIONS = ("approve", "approve_for_session", "approve_permanently", "deny", "cancel_turn")
@@ -436,13 +446,13 @@ class VibeAppServer:
     async def send_turn(self, session_id: str, text: str,
                         images: Optional[list[dict]] = None,
                         request_id: Optional[str] = None) -> dict:
-        message: list[dict] = [{"type": "text", "text": text}]
-        for img in images or []:
-            message.append({"type": "image", "attachment": img})
-        res = await self.call("turn/start", {
-            "sessionId": session_id, "message": message,
-            "idempotencyKey": request_id,
-        })
+        params: dict = {"sessionId": session_id, "message": message_blocks(text, images),
+                        "idempotencyKey": request_id}
+        if request_id:
+            # Vibe keys the user message by this id; session/rewind finds the
+            # message by it, so a turn sent without one cannot be rewound.
+            params["clientUserMessageId"] = request_id
+        res = await self.call("turn/start", params)
         if isinstance(res.get("lastEventId"), int):
             self.last_event_id = res["lastEventId"]
         return res

@@ -1,6 +1,8 @@
 import * as React from "react";
-import { Check, ChevronDown, Search } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Bot, Brain, ChevronDown, Eye, FilePen, Hand, ListChecks, Search, Sparkles, Zap } from "lucide-react";
+import { ModelIcon } from "./ModelIcon";
+import { RadioMark, menuItem, menuLabel, menuPanel, usePresence } from "./ui";
+import { cn, modelLabel } from "@/lib/utils";
 import { getAgents, getConfig, studioModels } from "@/lib/api";
 import type { AgentInfo, ModelInfo } from "@/lib/types";
 
@@ -34,6 +36,9 @@ function useDropdownPlacement(
   }, [open, anchorRef, menuHeight, searchHeight]);
   return { placement, listMaxH };
 }
+
+/** Composer toolbar chip: 32px, 8px radius, like the webapp's model chip. */
+export const chipClass = "flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm text-text-muted transition-colors duration-75 ease-out hover:bg-surface-muted hover:text-text";
 
 // ---------------------------------------------------------------- model list (cached app-wide)
 
@@ -95,7 +100,8 @@ export function useVibeModels(): { models: ModelInfo[]; loading: boolean } {
       if (!vibeModelPromise) {
         vibeModelPromise = getConfig().then(d => {
           const models = (d.vibeModels || []).map(v => ({ id: v.id, name: v.name, description: "",
-            maxContextLength: null, functionCalling: true, vision: v.supportsImages, ownedBy: "" }));
+            maxContextLength: v.autoCompactThreshold || v.maxContextLength || null, functionCalling: true, vision: v.supportsImages, ownedBy: "",
+            thinkingLevels: v.thinkingLevels || [], defaultThinking: v.thinking || null }));
           if (models.length && generation === registryGeneration) vibeModelCache = models;
           return models;
         });
@@ -127,7 +133,8 @@ export function ModelPicker({
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const btnRef = React.useRef<HTMLButtonElement>(null);
-  const { placement, listMaxH } = useDropdownPlacement(open, btnRef, 340, 42);
+  const { placement, listMaxH } = useDropdownPlacement(open, btnRef, 340, 52);
+  const presence = usePresence(open);
 
   // close on Escape, like the webapp
   React.useEffect(() => {
@@ -149,9 +156,12 @@ export function ModelPicker({
     return l;
   }, [models, value]);
 
+  const needle = q.toLowerCase();
   const filtered = list.filter((m) =>
-    !q || m.id.toLowerCase().includes(q.toLowerCase()) ||
-    (m.description || "").toLowerCase().includes(q.toLowerCase()));
+    !q || m.id.toLowerCase().includes(needle) || modelLabel(m.id, m.name).toLowerCase().includes(needle) ||
+    (m.description || "").toLowerCase().includes(needle));
+  const current = list.find((m) => m.id === value);
+  const currentLabel = modelLabel(value, current?.name);
 
   return (
     <div className={cn("relative", className)}>
@@ -159,63 +169,151 @@ export function ModelPicker({
         ref={btnRef}
         type="button"
         onClick={() => setOpen((o) => !o)}
-        title="Model"
+        title={`Model — ${value}`}
         aria-label="Select model"
-        className="flex items-center gap-1 h-7 max-w-[200px] rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+        aria-expanded={open}
+        className={cn(chipClass, "max-w-[200px] gap-2 bg-surface-muted text-text hover:bg-surface-muted/70")}
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-primary shrink-0" />
-        <span className="truncate">{value}</span>
-        <ChevronDown size={12} className="shrink-0" />
+        <ModelIcon id={value} size={16} />
+        <span className="hidden truncate sm:inline">{currentLabel}</span>
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={cn(
-            "absolute left-0 z-50 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up",
+      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
+      {presence.mounted && (
+        <div
+          data-side={placement === "up" ? "top" : "bottom"}
+          data-state={presence.state}
+          role="menu"
+          className={cn(
+            menuPanel, "absolute right-0 z-50 w-80 max-w-[calc(100vw-2rem)] overflow-hidden",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
-          )}>
-            <div className="flex items-center gap-2 px-3 border-b border-border">
-              <Search size={13} className="text-text-faint shrink-0" />
-              <input
-                autoFocus
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search models…"
-                className="w-full bg-transparent py-2.5 text-sm text-text placeholder:text-text-faint focus:outline-none"
-              />
-            </div>
-            <div className="overflow-y-auto py-1" style={{ maxHeight: listMaxH }}>
-              {filtered.length === 0 && (
-                <div className="px-3 py-4 text-xs text-text-faint">No models match.</div>
-              )}
-              {filtered.map((m) => {
-                const active = m.id === value;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => { onChange(m.id); setOpen(false); setQ(""); }}
-                    className={cn(
-                      "w-full flex items-start gap-2 px-3 py-2 text-left transition-colors",
-                      active ? "bg-surface-muted" : "hover:bg-surface-muted/60",
-                    )}
-                  >
-                    <Check size={14} className={cn("mt-0.5 shrink-0", active ? "text-primary" : "opacity-0")} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block font-mono text-xs text-text truncate">{m.id}</span>
-                      {m.description && (
-                        <span className="block text-[11px] text-text-faint truncate mt-0.5">{m.description}</span>
-                      )}
-                    </span>
-                    {m.vision && (
-                      <span title="Vision" className="text-[10px] text-info mt-0.5 shrink-0">vision</span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+          )}
+        >
+          <div className="flex items-center gap-2 rounded-sm px-3">
+            <Search size={16} className="text-text-faint shrink-0" />
+            <input
+              autoFocus
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search models…"
+              className="w-full bg-transparent py-2 text-sm text-text placeholder:text-text-faint focus:outline-none"
+            />
           </div>
-        </>
+          <div className="my-1 h-px bg-border" />
+          <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-1 overflow-y-auto overflow-x-hidden" style={{ maxHeight: listMaxH }}>
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-sm text-text-faint">No models match.</div>
+            )}
+            {filtered.map((m) => {
+              const active = m.id === value;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  aria-label={`${modelLabel(m.id, m.name)} (${m.id})`}
+                  title={m.id}
+                  onClick={() => { onChange(m.id); setOpen(false); setQ(""); }}
+                  className={cn(menuItem, "py-3")}
+                >
+                  <ModelIcon id={m.id} size={16} className="self-start mt-0.5" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{modelLabel(m.id, m.name)}</span>
+                    {m.description && <span className="block truncate text-xs text-text-muted mt-0.5">{m.description}</span>}
+                  </span>
+                  {m.vision && (
+                    <span title="Understands images" aria-label="Understands images" className="shrink-0 text-text-faint">
+                      <Eye size={14} />
+                    </span>
+                  )}
+                  <RadioMark checked={active} className="ml-1" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------- EffortPicker — reasoning level for the model
+
+const EFFORT_LABELS: Record<string, string> = { off: "Off", low: "Low", medium: "Medium", high: "High", max: "Max" };
+const effortLabel = (level: string) => EFFORT_LABELS[level] || level.charAt(0).toUpperCase() + level.slice(1);
+
+/**
+ * Reasoning effort chip. Offers the levels the vibe CLI registry lists for
+ * the selected model; "Default" leaves the model's own setting in place.
+ * Hidden for models without reasoning levels.
+ */
+export function EffortPicker({
+  model, value, onChange, className,
+}: {
+  model: string; value: string | null; onChange: (v: string | null) => void; className?: string;
+}) {
+  const { models } = useVibeModels();
+  const [open, setOpen] = React.useState(false);
+  const btnRef = React.useRef<HTMLButtonElement>(null);
+  const info = models.find(m => m.id === model);
+  // Vibe 3.0.4+ lets a model list levels of its own ("turbo", "minimal"…)
+  const levels = (info?.thinkingLevels || []).filter(l => /^[a-z][a-z0-9_-]{0,31}$/.test(l));
+  const { placement } = useDropdownPlacement(open, btnRef, 220);
+  const presence = usePresence(open);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open]);
+
+  if (!levels.length) return null;
+  const fallback = info?.defaultThinking ? `Default (${effortLabel(info.defaultThinking)})` : "Default";
+  const options: { id: string | null; label: string }[] = [{ id: null, label: fallback }, ...levels.map(l => ({ id: l, label: effortLabel(l) }))];
+  const current = value && levels.includes(value) ? effortLabel(value) : info?.defaultThinking ? effortLabel(info.defaultThinking) : "Auto";
+
+  return (
+    <div className={cn("relative", className)}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        title={`Reasoning effort — ${current}`}
+        aria-label="Select reasoning effort"
+        aria-expanded={open}
+        className={chipClass}
+      >
+        <Brain size={16} className="shrink-0" />
+        <span className="hidden sm:inline">{current}</span>
+        <ChevronDown size={14} className="shrink-0 opacity-60" />
+      </button>
+      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
+      {presence.mounted && (
+        <div
+          data-side={placement === "up" ? "top" : "bottom"}
+          data-state={presence.state}
+          role="menu"
+          className={cn(
+            menuPanel, "absolute right-0 z-50 w-56",
+            placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
+          )}
+        >
+          <div className={menuLabel}>Reasoning effort</div>
+          <div className="flex flex-col gap-1">
+            {options.map(o => {
+              const active = (o.id ?? null) === (value && levels.includes(value) ? value : null);
+              return (
+                <button key={o.id ?? "default"} type="button" role="menuitemradio" aria-checked={active}
+                  onClick={() => { onChange(o.id); setOpen(false); }}
+                  className={menuItem}>
+                  <span className="flex-1">{o.label}</span>
+                  <RadioMark checked={active} />
+                </button>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -277,6 +375,11 @@ const MODE_LABELS: Record<string, string> = {
   "smart-approve": "Smart approve",
 };
 
+/** Icon per approval posture, so the chip still reads when its label is hidden. */
+const MODE_ICONS: Record<string, React.ElementType> = {
+  "ask": Hand, "plan": ListChecks, "accept-edits": FilePen, "auto-approve": Zap, "smart-approve": Sparkles,
+};
+
 export function AgentPicker({
   value, onChange, className,
 }: {
@@ -285,6 +388,7 @@ export function AgentPicker({
   const [open, setOpen] = React.useState(false);
   const btnRef = React.useRef<HTMLButtonElement>(null);
   const { placement, listMaxH } = useDropdownPlacement(open, btnRef, 320, 34);
+  const presence = usePresence(open);
   const { agents } = useAgents();
 
   // close on Escape, like the webapp
@@ -308,35 +412,28 @@ export function AgentPicker({
     ? { ...agent, displayName: MODE_LABELS[agent.name] || agent.displayName || agent.name }
     : (mode ? { name: mode.id, displayName: mode.label } : { name: value, displayName: value });
   const currentHint = mode?.hint || agent?.description || "";
+  const ModeIcon = MODE_ICONS[value] || Bot;
 
-  const renderRow = (a: { name: string; displayName?: string; description?: string }, sub = false) => {
+  const renderRow = (a: { name: string; displayName?: string; description?: string }) => {
     const active = a.name === value;
     return (
       <button
         key={a.name}
         type="button"
+        role="menuitemradio"
+        aria-checked={active}
         aria-label={a.displayName || a.name}
         title={a.description}
         onClick={() => { onChange(a.name); setOpen(false); }}
-        className={cn(
-          "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors",
-          active ? "bg-surface-muted" : "hover:bg-surface-muted/60",
-        )}
+        className={cn(menuItem, "items-start py-2.5")}
       >
-        <Check size={14} className={cn("shrink-0", active ? "text-primary" : "opacity-0")} />
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="block text-xs text-text">{a.displayName || a.name}</span>
-            {sub && (
-              <span className="text-[9px] uppercase tracking-wide rounded px-1 py-0.5 bg-primary/15 text-primary shrink-0">
-                subagent
-              </span>
-            )}
-          </span>
+          <span className="block">{a.displayName || a.name}</span>
           {a.description && (
-            <span className="block text-[11px] text-text-faint truncate">{a.description}</span>
+            <span className="block line-clamp-2 text-xs text-text-muted mt-0.5">{a.description}</span>
           )}
         </span>
+        <RadioMark checked={active} className="mt-0.5" />
       </button>
     );
   };
@@ -349,36 +446,38 @@ export function AgentPicker({
         onClick={() => setOpen((o) => !o)}
         title={`Agent — ${currentHint || value}`}
         aria-label="Select agent"
-        className="flex items-center gap-1 h-7 rounded-lg px-2 text-[13px] text-text-muted hover:bg-surface-muted hover:text-text transition-colors"
+        aria-expanded={open}
+        className={chipClass}
       >
+        <ModeIcon size={16} className="shrink-0" />
         <span className="hidden sm:inline">{current.displayName || value}</span>
-        <ChevronDown size={12} className="shrink-0" />
+        <ChevronDown size={14} className="shrink-0 opacity-60" />
       </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className={cn(
-            "absolute left-0 z-50 w-64 max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-surface-raised shadow-2xl overflow-hidden animate-slide-up",
+      {open && <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />}
+      {presence.mounted && (
+        <div
+          data-side={placement === "up" ? "top" : "bottom"}
+          data-state={presence.state}
+          role="menu"
+          className={cn(
+            menuPanel, "absolute left-0 z-50 w-64 max-w-[calc(100vw-2rem)]",
             placement === "up" ? "bottom-full mb-2" : "top-full mt-2",
-          )}>
-            <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-text-faint border-b border-border">
-              Agent
-            </div>
-            <div className="overflow-y-auto py-1" style={{ maxHeight: listMaxH }}>
-              {modes.map((a) => renderRow(a))}
-              {subagents.length > 0 && (
-                <>
-                  <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-text-faint border-t border-border mt-1">
-                    Subagents
-                  </div>
-                  {subagents.map((a) => <div key={a.name} className="px-3 py-2 text-xs text-text-muted" title={a.description}>
-                    {a.displayName || a.name}<span className="block text-[11px] text-text-faint">Ask in the conversation to delegate</span>
-                  </div>)}
-                </>
-              )}
-            </div>
+          )}
+        >
+          <div className={menuLabel}>Mode</div>
+          <div className="grid grid-cols-[minmax(0,1fr)] content-start gap-1 overflow-y-auto overflow-x-hidden" style={{ maxHeight: listMaxH }}>
+            {modes.map((a) => renderRow(a))}
+            {subagents.length > 0 && (
+              <>
+                <div className="mx-1 my-1 h-px bg-border" />
+                <div className={menuLabel}>Subagents</div>
+                {subagents.map((a) => <div key={a.name} className="px-3 py-2 text-sm text-text-muted" title={a.description}>
+                  {a.displayName || a.name}<span className="block text-xs text-text-faint mt-0.5">Ask in the conversation to delegate</span>
+                </div>)}
+              </>
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
