@@ -55,6 +55,9 @@ export interface VibeModelInfo {
   name: string;
   supportsImages: boolean;
   thinkingLevels: string[];
+  maxContextLength?: number | null;
+  autoCompactThreshold?: number | null;
+  thinking?: string | null;
 }
 
 export interface Health {
@@ -66,7 +69,20 @@ export interface Health {
   default_model: string;
   default_agent: string;
   version: string;
+  vibe?: VibeInstall;
   user?: string;
+}
+
+/** The installed Vibe CLI and whether it is older than VibeDeck expects. */
+export interface VibeInstall {
+  version: string | null;
+  recommended: string;
+  outdated: boolean;
+  upgradeCommand: string;
+}
+
+export interface VibeReleaseNotes extends VibeInstall {
+  notes: { version: string; markdown: string }[];
 }
 
 /** Where the effective Mistral API key comes from — never includes the key itself. */
@@ -161,6 +177,9 @@ export interface ModelInfo {
   functionCalling: boolean;
   vision: boolean;
   ownedBy: string;
+  /** Reasoning levels the vibe CLI accepts for this model, and its default. */
+  thinkingLevels?: string[];
+  defaultThinking?: string | null;
 }
 
 export interface SkillInfo {
