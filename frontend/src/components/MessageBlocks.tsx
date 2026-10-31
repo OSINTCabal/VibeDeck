@@ -7,9 +7,10 @@ import {
   Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History, GitFork, Shrink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { interruptShell } from "@/lib/api";
 import { Badge, usePresence } from "./ui";
 import type { HistoryEntry } from "@/lib/types";
-import { durationSeconds, stepStatus, summarizeSteps } from "@/lib/steps";
+import { durationSeconds, isManualShell, stepStatus, summarizeSteps } from "@/lib/steps";
 
 // ---------------------------------------------------------------- helpers
 
@@ -424,6 +425,44 @@ export function NoticeBlock({ e }: { e: HistoryEntry }) {
   );
 }
 
+/**
+ * A command the user ran with "!": the command, its output open by default,
+ * and Stop while it runs (the entry id is the shell operation id).
+ */
+export function ShellBlock({ e }: { e: HistoryEntry }) {
+  const d: any = e.detail || {};
+  const st: any = e.state || {};
+  const command = d.input?.command || d.display?.message || "";
+  const status = st.status || "running";
+  const runningNow = status === "running" || status === "in_progress";
+  const output = String(st.outputText ?? st.output?.output ?? "").replace(/\n$/, "");
+  const exit = st.output?.exitCode ?? st.output?.returncode;
+  const [stopping, setStopping] = React.useState(false);
+  return (
+    <div className="px-6 py-1.5">
+      <div className="overflow-hidden rounded-xl border border-border bg-code">
+        <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
+          <Terminal size={13} className="shrink-0 text-text-muted" />
+          <span className="min-w-0 flex-1 truncate font-mono text-text" title={command}><span className="text-text-faint">$ </span>{command}</span>
+          {runningNow ? (
+            <button type="button" disabled={stopping}
+              onClick={() => { setStopping(true); void interruptShell(e.sessionId, e.id).catch(() => setStopping(false)); }}
+              className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-text-muted transition-colors hover:bg-danger/10 hover:text-danger disabled:opacity-40">
+              <Loader2 size={11} className="animate-spin" /> Stop
+            </button>
+          ) : <StatusMark status={status} />}
+          {exit != null && exit !== 0 && <span className="font-mono text-danger">exit {exit}</span>}
+        </div>
+        {(output || runningNow) && (
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border px-3 py-2 font-mono text-xs leading-5 text-text-muted">
+            {output || "…"}
+          </pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /** A point where Vibe changed the conversation: a compaction or a rewind. */
 export function CheckpointDivider({ e }: { e: HistoryEntry }) {
   const kind = (e as { kind?: string }).kind;
@@ -460,7 +499,7 @@ export const EntryBlock = React.memo(function EntryBlock({
     case "reasoning":
       return <ReasoningBlock e={e} defaultExpanded={expandReasoning} />;
     case "effect":
-      return <ToolCallBlock e={e} />;
+      return isManualShell(e) ? <ShellBlock e={e} /> : <ToolCallBlock e={e} />;
     case "callback":
       return e.detail?.kind === "user_input" ? <QuestionCard e={e} onResolve={onResolve} /> : e.detail?.kind === "approval" || !e.detail?.kind
         ? <ApprovalCard e={e} onResolve={onResolve} /> : <div role="alert" className="px-6 py-2 text-sm text-danger">This prompt requires a newer VibeDeck client. Stop the turn and resume in the CLI.</div>;

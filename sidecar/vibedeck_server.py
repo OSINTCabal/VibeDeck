@@ -35,6 +35,7 @@ from weakref import WeakValueDictionary
 import cloud_teleport
 import git_projects
 import httpx
+import processes
 import providers as provider_config
 import review
 import session_rpc
@@ -536,6 +537,7 @@ app.add_middleware(
 app.include_router(review.router)
 app.include_router(turn_queue.router)
 app.include_router(worktrees.router)
+app.include_router(processes.router)
 
 
 @app.middleware("http")

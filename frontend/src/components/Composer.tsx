@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUp, ListPlus, Loader2, Plus, Square, X } from "lucide-react";
+import { ArrowUp, ListPlus, Loader2, Plus, Square, Terminal, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AgentPicker, EffortPicker, ModelPicker } from "./Pickers";
 import { UsageMeter } from "./UsageMeter";
@@ -49,7 +49,7 @@ export function Composer({
   running = false, canQueue = false, disabled = false,
   placeholder = "Type / for quick access",
   model, onModelChange, agent, onAgentChange,
-  extraLeft, tray, footer, className, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange, onCompact,
+  extraLeft, tray, footer, className, onShell, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange, onCompact,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -75,6 +75,8 @@ export function Composer({
   reasoning?: string | null;
   onReasoningChange?: (v: string | null) => void;
   onCompact?: () => Promise<void>;
+  /** "!command" runs in the session's folder instead of going to the model. */
+  onShell?: (command: string) => Promise<void>;
 }) {
   const taRef = React.useRef<HTMLTextAreaElement>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -91,7 +93,19 @@ export function Composer({
     ta.style.height = Math.min(ta.scrollHeight, 192) + "px";
   }, [value]);
 
+  const shell = !!onShell && !running && value.trimStart().startsWith("!");
   const send = async () => {
+    if (shell) {
+      const command = value.trimStart().slice(1).trim();
+      if (!command || disabled || sendLock.current) return;
+      sendLock.current = true;
+      setSending(true);
+      setError(null);
+      try { await onShell!(command); onChange(""); }
+      catch (e) { setError(String(e)); }
+      finally { sendLock.current = false; setSending(false); }
+      return;
+    }
     if ((!value.trim() && images.length === 0) || (running && !canQueue) || disabled || sendLock.current) return;
     sendLock.current = true;
     setSending(true);
@@ -197,6 +211,12 @@ export function Composer({
             ))}
           </div>
         )}
+        {shell && (
+          <div className="flex items-center gap-1.5 px-4 pt-3 text-xs text-text-muted">
+            <Terminal size={12} className="shrink-0 text-primary" />
+            Shell command: runs in the session folder, and Vibe sees its output
+          </div>
+        )}
         <textarea
           ref={taRef}
           data-vd-composer
@@ -264,11 +284,11 @@ export function Composer({
               type="button"
               onClick={send}
               disabled={(!value.trim() && images.length === 0) || disabled}
-              title="Send (Enter)"
-              aria-label="Send"
+              title={shell ? "Run command (Enter)" : "Send (Enter)"}
+              aria-label={shell ? "Run command" : "Send"}
               className="ml-1 h-8 w-8 shrink-0 grid place-items-center rounded-md vd-send disabled:opacity-40 disabled:pointer-events-none"
             >
-              {disabled ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2} />}
+              {disabled ? <Loader2 size={16} className="animate-spin" /> : shell ? <Terminal size={15} /> : <ArrowUp size={16} strokeWidth={2} />}
             </button>
           )}
           </div>

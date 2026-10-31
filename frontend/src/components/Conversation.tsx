@@ -1,17 +1,18 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, FolderTree, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
+import { Activity as ActivityIcon, AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, FolderTree, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
 import { BranchPicker } from "./BranchPicker";
+import { ActivityPanel } from "./ActivityPanel";
 import { QueueBar } from "./QueueBar";
 import { ReviewPanel, pendingFiles } from "./ReviewPanel";
 import { RewindDialog } from "./RewindDialog";
 import { EntryBlock, MessageActions, StepGroup } from "./MessageBlocks";
 import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
-import { sendTurn, enqueueTurn, forkSession, compactSession, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
+import { sendTurn, enqueueTurn, forkSession, compactSession, runShell, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
@@ -47,7 +48,10 @@ export function Conversation({ session }: { session: Session }) {
   // review stays hidden if this Vibe has no review support
   const [review, setReview] = React.useState<ReviewState | null>(null);
   const [reviewSupported, setReviewSupported] = React.useState(true);
-  const [reviewOpen, setReviewOpen] = React.useState(false);
+  // one side panel at a time: the agent's file changes, or what runs alongside
+  const [panel, setPanel] = React.useState<"changes" | "activity" | null>(null);
+  const reviewOpen = panel === "changes";
+  const togglePanel = (p: "changes" | "activity") => setPanel(cur => (cur === p ? null : p));
   const loadReview = React.useCallback(() => {
     getReview(session.id).then(r => { setReview(r); setReviewSupported(true); })
       .catch(e => { if (/not found|-32601/i.test(String(e))) setReviewSupported(false); });
@@ -60,6 +64,14 @@ export function Conversation({ session }: { session: Session }) {
     return () => clearInterval(timer);
   }, [reviewOpen, running, loadReview]);
   const changedFiles = pendingFiles(review).length;
+  const childList = Object.values(conv.childSessions);
+  const liveAgents = childList.filter(childRunning).length;
+  const finishedAgents = childList.length - liveAgents;
+  // "!command": the output streams into the conversation as a shell entry
+  const shellCommand = async (command: string) => {
+    setSendError(null);
+    await runShell(session.id, command);
+  };
   // the compacted history arrives on the event stream as a fresh snapshot
   const compact = async () => { await compactSession(session.id); };
   const [rewindEntry, setRewindEntry] = React.useState<string | null>(null);
@@ -281,7 +293,7 @@ export function Conversation({ session }: { session: Session }) {
         <CloudDialog sessionId={session.id} open={cloudOpen} onClose={() => setCloudOpen(false)} />
         {reviewSupported && (
           <button
-            onClick={() => setReviewOpen(o => !o)}
+            onClick={() => togglePanel("changes")}
             title={changedFiles ? `${changedFiles} changed file${changedFiles === 1 ? "" : "s"} to review` : "Review changes"}
             aria-label="Review changes"
             aria-pressed={reviewOpen}
@@ -296,6 +308,17 @@ export function Conversation({ session }: { session: Session }) {
             )}
           </button>
         )}
+        <button
+          onClick={() => togglePanel("activity")}
+          title={liveAgents ? `${liveAgents} subagent${liveAgents === 1 ? "" : "s"} running` : "Subagents and background processes"}
+          aria-label="Activity"
+          aria-pressed={panel === "activity"}
+          className={cn("relative shrink-0 grid h-8 w-8 place-items-center rounded-md transition-colors hover:bg-surface-muted hover:text-text",
+            panel === "activity" ? "bg-surface-muted text-text" : "text-text-muted")}
+        >
+          <ActivityIcon size={16} />
+          {liveAgents > 0 && <span className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary animate-blink" />}
+        </button>
         <button
           onClick={handoffToCli}
           disabled={running}
@@ -342,13 +365,19 @@ export function Conversation({ session }: { session: Session }) {
         </div>
       </div>
 
-      {/* subagent activity — child sessions the model spawned mid-turn */}
-      {Object.keys(conv.childSessions).length > 0 && (
+      {/* subagent activity: running ones as chips, finished ones folded into one */}
+      {childList.length > 0 && (
         <div className="shrink-0 px-6 pb-1">
           <div className="mx-auto max-w-3xl flex flex-wrap items-center gap-2">
-            {Object.values(conv.childSessions).map((cs) => (
+            {childList.filter(childRunning).map((cs) => (
               <SubagentChip key={cs.id} cs={cs} />
             ))}
+            {finishedAgents > 0 && (
+              <button type="button" onClick={() => setPanel("activity")}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-xs text-text-muted transition-colors hover:text-text">
+                <Bot size={12} className="text-text-faint" /> {finishedAgents} subagent{finishedAgents === 1 ? "" : "s"} finished
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -419,6 +448,7 @@ export function Conversation({ session }: { session: Session }) {
             onStop={stop}
             running={running}
             canQueue
+            onShell={released ? undefined : shellCommand}
             tray={<SessionCheckout cwd={session.cwd} worktree={conv.session?.worktree} />}
             onCompact={running || released ? undefined : compact}
             // while the agent works, keep typing the next queued message
@@ -444,7 +474,10 @@ export function Conversation({ session }: { session: Session }) {
       </div>
     </div>
     {reviewOpen && reviewSupported && (
-      <ReviewPanel sessionId={session.id} review={review} running={running} onChange={setReview} onClose={() => setReviewOpen(false)} />
+      <ReviewPanel sessionId={session.id} review={review} running={running} onChange={setReview} onClose={() => setPanel(null)} />
+    )}
+    {panel === "activity" && (
+      <ActivityPanel sessionId={session.id} running={running} refreshKey={conv.childSessions} onClose={() => setPanel(null)} />
     )}
     </div>
     <RewindDialog sessionId={session.id} cwd={session.cwd} entryId={rewindEntry} onClose={() => setRewindEntry(null)} onDone={afterRewind} />
@@ -453,6 +486,10 @@ export function Conversation({ session }: { session: Session }) {
 }
 
 // ---------------------------------------------------------------- subagent chip
+
+function childRunning(cs: ChildSession) {
+  return (typeof cs.status === "string" ? cs.status : cs.status?.type) === "running";
+}
 
 function SubagentChip({ cs }: { cs: ChildSession }) {
   const status = typeof cs.status === "string" ? cs.status : cs.status?.type || "";

@@ -12,6 +12,8 @@ class FakeBridge(VibeAppServer):
     states = {}
     # review/* answers, shared by every bridge: {"state", "baseline", "turnDiff", "hunks"}
     review = {}
+    # session/subagents/read answers, shared by every bridge
+    subagents = []
 
     def __init__(self, cwd, **kwargs):
         super().__init__(cwd, server_cmd="fake")
@@ -45,7 +47,8 @@ class FakeBridge(VibeAppServer):
             self.states[sid] = {"session": {"id": sid, "cwd": cwd, "title": "Test", "model": "mistral-large-4",
                 "agent": {"name": "accept-edits"}, "reasoningEffort": None, "status": {"type": "idle"},
                 **({"worktree": {"name": "brave-otter", "branch": "vibe/brave-otter", "path": path, "created": True}} if worktree else {})},
-                "eventId": 0, "history": [], "turns": [], "activeCallbacks": [], "childSessions": []}
+                "eventId": 0, "history": [], "turns": [], "activeCallbacks": [], "childSessions": [],
+                "backgroundProcesses": [{"processId": "p1", "command": "npm run dev", "status": "running", "exitCode": None, "createdAt": "2026-10-31T10:00:00Z"}]}
             return {"state": copy.deepcopy(self.states[sid])}
         if method in ("session/resume", "session/read"):
             if sid not in self.states:
@@ -103,6 +106,30 @@ class FakeBridge(VibeAppServer):
             return self._review(method, params)
         elif method.startswith("session/turn/"):
             return self._queue(method, params)
+        elif method == "session/subagents/read":
+            return {"subagents": copy.deepcopy(FakeBridge.subagents)}
+        elif method == "session/subagents/interrupt":
+            running = [a for a in FakeBridge.subagents if a["status"] == "running"]
+            for a in running:
+                a["status"] = "interrupted"
+            return {"results": [{"sessionId": a["sessionId"], "name": a["name"], "outcome": "interrupted"} for a in running]}
+        elif method == "session/backgroundProcess/output":
+            text = b"line 1\nline 2\n"
+            if params["processId"] != "p1":
+                return {"availability": "unavailable", "processId": params["processId"]}
+            import base64
+            return {"availability": "available", "processId": "p1", "outputBase64": base64.b64encode(text).decode(),
+                    "outputStartCursor": 0, "nextCursor": len(text), "bytesAvailable": len(text),
+                    "hasMore": False, "truncatedBefore": False, "isFinal": False}
+        elif method == "session/backgroundProcess/stop":
+            return {"processId": params["processId"], "status": "stopped", "exitCode": None}
+        elif method == "session/shellCommand":
+            if params.get("action") == "interrupt":
+                return {"accepted": True, "lastEventId": 1}
+            if params["command"].startswith("fail"):
+                raise BridgeError(-32602, "Shell command cannot run now")
+            self.shell = [*getattr(self, "shell", []), params]
+            return {"accepted": True, "lastEventId": 1}
         elif method == "session/fork":
             source = self.states[params["sourceSessionId"]]
             fork_id = uuid.uuid4().hex

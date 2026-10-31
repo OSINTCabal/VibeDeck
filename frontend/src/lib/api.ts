@@ -382,3 +382,28 @@ export const setWorktreeLimit = (limit: number) =>
   http<{ limit: number; failures: string[] }>("/api/worktrees/limit", { method: "PUT", body: JSON.stringify({ limit }) });
 export const compactSession = (sid: string, instructions = "") =>
   http<{ summary: string }>(`/api/sessions/${sid}/compact`, { method: "POST", body: JSON.stringify({ instructions }) });
+
+// ---------------------------------------------------------------- subagents, background processes, shell
+
+export interface SubagentRun {
+  sessionId: string; name: string; agentType?: string | null;
+  status: "running" | "idle" | "interrupted" | "failed" | "closed" | "unknown";
+  model?: string | null; usage?: { totalTokens?: number } | null; costUsd?: number | null; steps?: number | null;
+}
+export interface BackgroundProcess {
+  processId: string; command: string; status: "running" | "completed" | "failed" | "stopped" | "orphaned";
+  exitCode?: number | null; createdAt: string;
+}
+export const getSubagents = (sid: string) => http<{ subagents: SubagentRun[] }>(`/api/sessions/${sid}/subagents`);
+export const interruptSubagents = (sid: string) =>
+  http<{ results: { name: string; outcome: string }[] }>(`/api/sessions/${sid}/subagents/interrupt`, { method: "POST", body: "{}" });
+export const getBackground = (sid: string) => http<{ processes: BackgroundProcess[] }>(`/api/sessions/${sid}/background`);
+export const getBackgroundOutput = (sid: string, processId: string) =>
+  http<{ available: boolean; text?: string; truncatedBefore?: boolean; isFinal?: boolean }>(
+    `/api/sessions/${sid}/background/${encodeURIComponent(processId)}/output`);
+export const stopBackground = (sid: string, processId: string) =>
+  http<{ status: string }>(`/api/sessions/${sid}/background/${encodeURIComponent(processId)}/stop`, { method: "POST" });
+export const runShell = (sid: string, command: string) =>
+  http<{ operationId: string }>(`/api/sessions/${sid}/shell`, { method: "POST", body: JSON.stringify({ command }) });
+export const interruptShell = (sid: string, operationId: string) =>
+  http<{ ok: boolean }>(`/api/sessions/${sid}/shell/${encodeURIComponent(operationId)}/interrupt`, { method: "POST" });

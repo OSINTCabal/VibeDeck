@@ -19,11 +19,16 @@ export function groupSteps(entries: HistoryEntry[]): StepItem[] {
     run = [];
   };
   for (const entry of entries) {
-    if (entry.type === "effect") run.push(entry);
+    // a "!command" the user ran stays on its own, outside the agent's steps
+    if (entry.type === "effect" && !isManualShell(entry)) run.push(entry);
     else { flush(); items.push({ kind: "entry", entry }); }
   }
   flush();
   return items;
+}
+
+export function isManualShell(e: HistoryEntry): boolean {
+  return e.type === "effect" && e.detail?.kind === "shell" && !e.turnId;
 }
 
 export function toolName(e: HistoryEntry): string {

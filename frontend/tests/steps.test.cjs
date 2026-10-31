@@ -21,6 +21,14 @@ test('consecutive tool calls fold into one group; lone calls stay single', () =>
   assert.equal(items[3].entry.id, 't3');
 });
 
+test('commands the user ran with ! stay on their own', () => {
+  const manual = id => ({ id, type: 'effect', turnId: null, detail: { toolName: 'shell', kind: 'shell' }, state: { status: 'completed' } });
+  const agentShell = { ...tool('t2', 'shell'), turnId: 'turn-1', detail: { toolName: 'shell', kind: 'shell' } };
+  const items = groupSteps([manual('m1'), manual('m2'), tool('t1', 'bash'), agentShell]);
+  assert.deepEqual(items.map(i => i.kind), ['entry', 'entry', 'group']);
+  assert.deepEqual(items[2].entries.map(e => e.id), ['t1', 't2']);
+});
+
 test('summary names commands, files and other tools in order of appearance', () => {
   const s = summarizeSteps([
     tool('1', 'bash'), tool('2', 'bash'), tool('3', 'read_file', { path: 'src/ui/theme.rs' }),
