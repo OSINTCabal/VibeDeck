@@ -38,6 +38,7 @@ import cloud_teleport
 import git_projects
 import httpx
 import providers as provider_config
+import review
 import session_rpc
 import vibe_install
 from agent_routing import AgentSettings
@@ -510,6 +511,8 @@ app.add_middleware(
     allow_origins=list(LOCAL_ORIGINS),
     allow_methods=["*"], allow_headers=["*"],
 )
+# feature routers; included first so the catch-all /api route never shadows them
+app.include_router(review.router)
 
 
 @app.middleware("http")

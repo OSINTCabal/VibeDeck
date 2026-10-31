@@ -9,6 +9,8 @@ from vibe_bridge import AGENT_MODES, BridgeError, VibeAppServer
 
 class FakeBridge(VibeAppServer):
     states = {}
+    # review/* answers, shared by every bridge: {"state", "baseline", "turnDiff", "hunks"}
+    review = {}
 
     def __init__(self, cwd, **kwargs):
         super().__init__(cwd, server_cmd="fake")
@@ -69,7 +71,37 @@ class FakeBridge(VibeAppServer):
             return {"worktrees": []}
         elif method.startswith("vibeCode/"):
             return self._vibe_code(method, params)
+        elif method.startswith("review/"):
+            return self._review(method, params)
+        elif method == "session/rewind/read":
+            return {"hasFileChanges": True, "paths": [f"{self.cwd}/a.py"]}
+        elif method == "session/rewind":
+            history = self.states[sid]["history"]
+            index = next((i for i, e in enumerate(history) if e["id"] == params["entryId"]), None)
+            if index is None or history[index].get("role") != "user":
+                raise BridgeError(-32004, f"Rewindable history entry not found: {params['entryId']}")
+            message = history[index]["content"][0]["text"]
+            del history[index:]
+            return {"message": message, "restoreErrors": [],
+                    "restoredPaths": [f"{self.cwd}/a.py"] if params.get("restoreFiles") else [],
+                    "state": copy.deepcopy(self.states[sid]), "sessionLog": {}}
         return {}
+
+    def _review(self, method, params):
+        review = FakeBridge.review
+        if method == "review/state":
+            return copy.deepcopy(review.get("state", {"files": [], "scopes": []}))
+        if method == "review/baseline":
+            return {"content": review.get("baseline", "")}
+        if method == "review/turnDiff":
+            return copy.deepcopy(review["turnDiff"])
+        if method == "review/hunks":
+            return {"hunks": copy.deepcopy(review.get("hunks", []))}
+        if method in ("review/approve", "review/revert"):
+            review.setdefault("decisions", []).append((method, params["target"]))
+            review["state"] = {"files": [], "scopes": []}
+            return {}
+        raise BridgeError(-32601, f"Method not found: {method}")
 
     # ---- Vibe Code Web: a picker with one linked project; teleport events are
     # pushed to subscribers like real notifications.

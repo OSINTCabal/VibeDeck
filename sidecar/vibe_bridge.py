@@ -447,10 +447,12 @@ class VibeAppServer:
         message: list[dict] = [{"type": "text", "text": text}]
         for img in images or []:
             message.append({"type": "image", "attachment": img})
-        res = await self.call("turn/start", {
-            "sessionId": session_id, "message": message,
-            "idempotencyKey": request_id,
-        })
+        params: dict = {"sessionId": session_id, "message": message, "idempotencyKey": request_id}
+        if request_id:
+            # Vibe keys the user message by this id; session/rewind finds the
+            # message by it, so a turn sent without one cannot be rewound.
+            params["clientUserMessageId"] = request_id
+        res = await self.call("turn/start", params)
         if isinstance(res.get("lastEventId"), int):
             self.last_event_id = res["lastEventId"]
         return res

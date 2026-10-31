@@ -1,13 +1,15 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, Folder, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
+import { ReviewPanel, pendingFiles } from "./ReviewPanel";
+import { RewindDialog } from "./RewindDialog";
 import { EntryBlock, MessageActions, StepGroup } from "./MessageBlocks";
 import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
-import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession } from "@/lib/api";
+import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
@@ -38,6 +40,25 @@ export function Conversation({ session }: { session: Session }) {
     if (acceptedAgent) setAgent(typeof acceptedAgent === "string" ? acceptedAgent : acceptedAgent.name);
   }, [conv.session?.model, conv.session?.agent]);
   const running = conv.turnStatus === "running";
+
+  // pending file changes from Vibe's checkpoints; null until loaded, and the
+  // review stays hidden if this Vibe has no review support
+  const [review, setReview] = React.useState<ReviewState | null>(null);
+  const [reviewSupported, setReviewSupported] = React.useState(true);
+  const [reviewOpen, setReviewOpen] = React.useState(false);
+  const loadReview = React.useCallback(() => {
+    getReview(session.id).then(r => { setReview(r); setReviewSupported(true); })
+      .catch(e => { if (/not found|-32601/i.test(String(e))) setReviewSupported(false); });
+  }, [session.id]);
+  React.useEffect(() => { setReview(null); if (!released) loadReview(); }, [loadReview, released]);
+  React.useEffect(() => { if (conv.turnStatus === "completed") loadReview(); }, [conv.turnStatus, loadReview]);
+  React.useEffect(() => {
+    if (!reviewOpen || !running) return;
+    const timer = setInterval(loadReview, 4000);
+    return () => clearInterval(timer);
+  }, [reviewOpen, running, loadReview]);
+  const changedFiles = pendingFiles(review).length;
+  const [rewindEntry, setRewindEntry] = React.useState<string | null>(null);
 
   // auto-scroll to bottom on new content — only when the user is already near
   // the bottom (don't yank the view while reading history), and jump instantly
@@ -164,7 +185,16 @@ export function Conversation({ session }: { session: Session }) {
       requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-vd-composer]")?.focus());
     },
     onResend: (t: string) => { void sendRef.current(t, []).catch(() => {}); },
+    onRewind: (id: string) => setRewindEntry(id),
   }), []);
+  const afterRewind = (message: string, _restored: string[], errors: string[]) => {
+    setRewindEntry(null);
+    setText(message);
+    setSendError(errors.length ? `Some files were not restored: ${errors.join("; ")}` : null);
+    conv.resync();
+    loadReview();
+    requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>("[data-vd-composer]")?.focus());
+  };
   const steps = React.useMemo(() => groupSteps(conv.entries), [conv.entries]);
   // Long sessions open on their latest steps; older ones render on demand, so
   // switching sessions does not lay out hundreds of markdown blocks at once.
@@ -183,8 +213,9 @@ export function Conversation({ session }: { session: Session }) {
   };
 
   return (
-    <MessageActions.Provider value={actions}>
-    <div className="flex h-full flex-col">
+    <MessageActions.Provider value={running ? { ...actions, onRewind: undefined } : actions}>
+    <div className="relative flex h-full">
+    <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* header */}
       <div className="flex h-12 items-center gap-1 pl-5 pr-3 shrink-0">
         <div className="min-w-0 flex-1 flex items-center gap-2 text-sm">
@@ -220,6 +251,23 @@ export function Conversation({ session }: { session: Session }) {
           <Cloud size={16} />
         </button>
         <CloudDialog sessionId={session.id} open={cloudOpen} onClose={() => setCloudOpen(false)} />
+        {reviewSupported && (
+          <button
+            onClick={() => setReviewOpen(o => !o)}
+            title={changedFiles ? `${changedFiles} changed file${changedFiles === 1 ? "" : "s"} to review` : "Review changes"}
+            aria-label="Review changes"
+            aria-pressed={reviewOpen}
+            className={cn("relative shrink-0 grid h-8 w-8 place-items-center rounded-md transition-colors hover:bg-surface-muted hover:text-text",
+              reviewOpen ? "bg-surface-muted text-text" : "text-text-muted")}
+          >
+            <FileDiff size={16} />
+            {changedFiles > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                {changedFiles}
+              </span>
+            )}
+          </button>
+        )}
         <button
           onClick={handoffToCli}
           disabled={running}
@@ -361,6 +409,11 @@ export function Conversation({ session }: { session: Session }) {
         </div>
       </div>
     </div>
+    {reviewOpen && reviewSupported && (
+      <ReviewPanel sessionId={session.id} review={review} running={running} onChange={setReview} onClose={() => setReviewOpen(false)} />
+    )}
+    </div>
+    <RewindDialog sessionId={session.id} cwd={session.cwd} entryId={rewindEntry} onClose={() => setRewindEntry(null)} onDone={afterRewind} />
     </MessageActions.Provider>
   );
 }

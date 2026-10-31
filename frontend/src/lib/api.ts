@@ -303,3 +303,46 @@ export const cloudTeleportStatus = (sid: string, op: string) => cloud(sid, `/tel
 export const cloudTeleportPush = (sid: string, op: string, approved: boolean) =>
   cloud(sid, `/teleport/${op}/push`, { approved }) as Promise<TeleportStatus>;
 export const cloudTeleportCancel = (sid: string, op: string) => cloud(sid, `/teleport/${op}/cancel`, {}) as Promise<TeleportStatus>;
+
+// ---------------------------------------------------------------- review and rewind
+
+export type ReviewOwner = { kind: "agent"; turnId: number } | { kind: "manual"; index: number };
+export type ReviewStatus = "modified" | "created" | "deleted" | "binary_or_undecodable";
+export interface ReviewRegion {
+  kind: "text" | "opaque"; versionIndex: number; ordinal: number; owner: ReviewOwner;
+  decision: "pending" | "keep" | "revert";
+}
+export interface ReviewState {
+  cwd: string;
+  files: { path: string; status: ReviewStatus; regions: ReviewRegion[] }[];
+  scopes: { owner: ReviewOwner; files: { path: string; status: ReviewStatus; regionCount: number }[] }[];
+}
+export type DiffRow =
+  | { t: "ctx"; old: number; new: number; text: string }
+  | { t: "del"; old: number; text: string }
+  | { t: "add"; new: number; text: string }
+  | { t: "skip"; count: number };
+export type RegionRef = { versionIndex: number; ordinal: number };
+export interface ReviewFileDiff {
+  path: string; status: ReviewStatus; rows: DiffRow[];
+  hunks: { side: "additions" | "deletions"; line: number; regions: RegionRef[]; row: number }[];
+  opaque?: boolean; tooLarge?: boolean;
+}
+export type ReviewTarget =
+  | { kind: "regions"; path: string; regions: RegionRef[] }
+  | { kind: "file"; path: string }
+  | { kind: "scope"; owner: ReviewOwner }
+  | { kind: "scopeFile"; owner: ReviewOwner; path: string }
+  | { kind: "all" };
+export const ownerKey = (o: ReviewOwner) => o.kind === "agent" ? `agent:${o.turnId}` : `manual:${o.index}`;
+
+export const getReview = (sid: string) => http<ReviewState>(`/api/sessions/${sid}/review`);
+export const getReviewFile = (sid: string, path: string, owner?: ReviewOwner) =>
+  http<ReviewFileDiff>(`/api/sessions/${sid}/review/file?${new URLSearchParams({ path, ...(owner ? { owner: ownerKey(owner) } : {}) })}`);
+export const decideReview = (sid: string, action: "approve" | "revert", target: ReviewTarget) =>
+  http<ReviewState>(`/api/sessions/${sid}/review/${action}`, { method: "POST", body: JSON.stringify({ target }) });
+export const previewRewind = (sid: string, entryId: string) =>
+  http<{ hasFileChanges: boolean; paths: string[] }>(`/api/sessions/${sid}/rewind/${encodeURIComponent(entryId)}`);
+export const rewindTo = (sid: string, entryId: string, restoreFiles: boolean) =>
+  http<{ message: string; restoredPaths: string[]; restoreErrors: string[] }>(
+    `/api/sessions/${sid}/rewind/${encodeURIComponent(entryId)}`, { method: "POST", body: JSON.stringify({ restoreFiles }) });

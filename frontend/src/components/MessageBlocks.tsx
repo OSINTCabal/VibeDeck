@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
   Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
-  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw,
+  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, usePresence } from "./ui";
@@ -50,6 +50,7 @@ function toolOutput(e: HistoryEntry): string {
 export const MessageActions = React.createContext<{
   onEdit?: (text: string) => void;
   onResend?: (text: string) => void;
+  onRewind?: (entryId: string) => void;
 }>({});
 
 function useCopy(): [boolean, (text: string) => void] {
@@ -67,8 +68,8 @@ function useCopy(): [boolean, (text: string) => void] {
 
 const actionBtn = "grid h-7 w-7 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text";
 
-function ActionBar({ text, user }: { text: string; user: boolean }) {
-  const { onEdit, onResend } = React.useContext(MessageActions);
+function ActionBar({ text, user, id }: { text: string; user: boolean; id?: string }) {
+  const { onEdit, onResend, onRewind } = React.useContext(MessageActions);
   const [copied, copy] = useCopy();
   if (!text) return null;
   return (
@@ -81,6 +82,7 @@ function ActionBar({ text, user }: { text: string; user: boolean }) {
       </button>
       {user && onEdit && <button type="button" onClick={() => onEdit(text)} className={actionBtn} title="Edit in composer" aria-label="Edit message in composer"><Pencil size={16} /></button>}
       {user && onResend && <button type="button" onClick={() => onResend(text)} className={actionBtn} title="Send again" aria-label="Send message again"><RotateCcw size={16} /></button>}
+      {user && onRewind && id && <button type="button" onClick={() => onRewind(id)} className={actionBtn} title="Rewind to this message" aria-label="Rewind the conversation to this message"><History size={16} /></button>}
     </div>
   );
 }
@@ -147,7 +149,7 @@ export function MessageEntry({ e, reveal = true }: { e: HistoryEntry; reveal?: b
           {images}
           <div className="whitespace-pre-wrap break-words text-base leading-6">{text}</div>
         </div>
-        <ActionBar text={text} user />
+        <ActionBar text={text} user id={e.id} />
       </div>
     );
   }
