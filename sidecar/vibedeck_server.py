@@ -40,6 +40,7 @@ import review
 import session_rpc
 import turn_queue
 import vibe_install
+import worktrees
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
 from agent_routing import write_settings as write_agent_settings
@@ -128,6 +129,8 @@ class SessionCreate(BaseModel):
     reasoning: Optional[str] = None
     lane: str = "code"          # work | code
     title: Optional[str] = None
+    # start in a new git worktree Vibe creates and names (its own branch)
+    worktree: StrictBool = False
 
 
 class ApiKeyReq(BaseModel):
@@ -288,6 +291,11 @@ def normalize_notification(msg: dict) -> dict:
         # SseEvent type expects session/activeCallbacks/lastEventId)
         st = p.get("state", {})
         return {"kind": "snapshot", **st, "lastEventId": st.get("eventId", 0)}
+    if method in ("session/compacted", "session/contextCleared"):
+        # the conversation was replaced (summary or clear): a fresh snapshot
+        st = p.get("state", {})
+        return {"kind": "snapshot", **st, "lastEventId": st.get("eventId", p.get("eventId", 0)),
+                "compacted": method == "session/compacted"}
     if method == "session/childSessionUpdated":
         return {"kind": "childSession", "childSession": p.get("childSession", {})}
     if method == "callback/requested":
@@ -316,6 +324,7 @@ async def _ensure_bridge(sid: str) -> tuple[Any, str]:
 
 # looked up per call so tests can patch _ensure_bridge
 session_rpc.configure(lambda sid: _ensure_bridge(sid))
+worktrees.configure(lambda: vsync.host(), lambda: [r["cwd"] for r in store.list_sessions() if r.get("cwd")])
 
 
 async def _open_session(sid: str) -> tuple[Any, str]:
@@ -390,7 +399,17 @@ def _persist_session_state(sid: str, state: dict) -> None:
             fields["reasoning" if field == "reasoningEffort" else field] = value
     status = session.get("status", {})
     fields["status"] = status.get("type", "idle") if isinstance(status, dict) else "idle"
+    path = _worktree_path(session)
+    if path:
+        fields["cwd"] = path
     store.upsert_session(sid, **fields)
+
+
+def _worktree_path(session: dict) -> Optional[str]:
+    """The worktree a session works in, once Vibe has created it."""
+    worktree = session.get("worktree")
+    path = worktree.get("path") if isinstance(worktree, dict) else None
+    return path if isinstance(path, str) and Path(path).is_dir() else None
 
 
 async def _stop_tap(sid: str) -> None:
@@ -516,6 +535,7 @@ app.add_middleware(
 # feature routers; included first so the catch-all /api route never shadows them
 app.include_router(review.router)
 app.include_router(turn_queue.router)
+app.include_router(worktrees.router)
 
 
 @app.middleware("http")
@@ -1066,10 +1086,12 @@ async def create_session(s: SessionCreate) -> dict:
     bridge = None
     try:
         bridge = await manager.spawn(cwd, key=f"new-{uuid.uuid4().hex[:8]}")
-        await bridge.start_session()
+        await bridge.start_session(worktree={"kind": "auto"} if s.worktree else None)
     except (BridgeError, FileNotFoundError, OSError) as e:
         if bridge is not None:
             await bridge.close()
+        if s.worktree and isinstance(e, BridgeError) and e.code not in session_rpc.TRANSPORT_ERRORS:
+            raise HTTPException(400, f"Could not create a worktree: {e.message}") from e
         raise HTTPException(502, f"failed to start vibe session: {e}")
     sid = bridge.session_id
     manager.register(sid, bridge)
@@ -1092,6 +1114,18 @@ async def create_session(s: SessionCreate) -> dict:
         await manager.close(sid)
         raise HTTPException(502, f"Session {sid} was created but could not be read. Refresh the session list.") from e
     effective = state.get("session", {})
+    # a worktree session works in the worktree, not the folder it started
+    # from; Vibe reports the worktree shortly after the session starts
+    if s.worktree:
+        for _ in range(20):
+            if _worktree_path(effective):
+                break
+            await asyncio.sleep(0.25)
+            try:
+                effective = (await bridge.read_session(sid)).get("state", {}).get("session", {})
+            except BridgeError:
+                break
+        cwd = _worktree_path(effective) or cwd
     agent = effective.get("agent")
     if isinstance(agent, dict):
         agent = agent.get("name")

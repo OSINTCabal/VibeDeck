@@ -8,6 +8,7 @@ import { Card, CardBody, Select, Badge, Button, Input } from "@/components/ui";
 import { useVibeModels } from "@/components/Pickers";
 import { ProvidersSection } from "@/components/ProvidersSection";
 import { VibeReleaseNotes } from "@/components/VibeReleaseNotes";
+import { WorktreesCard } from "@/components/WorktreesCard";
 import { THEMES, getTheme, setTheme, type ThemeId } from "@/lib/theme";
 import {
   notificationsEnabled, setNotificationsEnabled, notificationsSupported,
@@ -304,6 +305,8 @@ export function SettingsView() {
           <VibeReleaseNotes open={notesOpen} onClose={() => setNotesOpen(false)} />
         </CardBody>
       </Card>
+
+      <WorktreesCard />
 
       <Card>
         <CardBody className="space-y-3">

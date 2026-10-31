@@ -363,3 +363,22 @@ export const steerQueued = (sid: string, itemId: string, expectedTurnId: string)
 export const resumeQueue = (sid: string) => http<TurnQueue>(`/api/sessions/${sid}/queue/resume`, { method: "POST" });
 export const forkSession = (sid: string, entryId?: string) =>
   http<Session>(`/api/sessions/${sid}/fork`, { method: "POST", body: JSON.stringify(entryId ? { entryId } : {}) });
+
+// ---------------------------------------------------------------- worktrees and compaction
+
+export interface VibeWorktree {
+  name: string; branch: string; cwd: string; root: string; repoRoot: string;
+  branchChanges?: { additions: number; deletions: number } | null;
+}
+export interface WorktreeRemoval {
+  outcome: "removed" | "kept_dirty" | "kept_in_use" | "kept_unmanaged" | "kept_error" | "not_found";
+  reasons?: string[]; holders?: number | null; branch?: string | null; branchDeleted?: boolean;
+}
+export const getAllWorktrees = () => http<{ worktrees: VibeWorktree[]; repositories: string[] }>("/api/worktrees/all");
+export const removeWorktree = (cwd: string, force = false) =>
+  http<WorktreeRemoval>("/api/worktrees/remove", { method: "POST", body: JSON.stringify({ cwd, force }) });
+export const pruneWorktrees = () => http<{ removed: number }>("/api/worktrees/prune", { method: "POST" });
+export const setWorktreeLimit = (limit: number) =>
+  http<{ limit: number; failures: string[] }>("/api/worktrees/limit", { method: "PUT", body: JSON.stringify({ limit }) });
+export const compactSession = (sid: string, instructions = "") =>
+  http<{ summary: string }>(`/api/sessions/${sid}/compact`, { method: "POST", body: JSON.stringify({ instructions }) });

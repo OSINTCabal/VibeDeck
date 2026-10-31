@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { ArrowRight, Loader2, RefreshCw, Shrink } from "lucide-react";
 import { getUsage } from "@/lib/api";
 import { cn, formatTokens, modelLabel } from "@/lib/utils";
 import type { UsageAllowance, UsageSnapshot } from "@/lib/types";
@@ -110,13 +110,24 @@ function Ring({ percent, spinning }: { percent: number | null; spinning: boolean
  * connected Mistral account, plus the current session's context window.
  */
 export function UsageMeter({
-  model, contextTokens, sessionTokens,
+  model, contextTokens, sessionTokens, onCompact,
 }: {
   model: string;
   contextTokens?: number | null;
   sessionTokens?: number | null;
+  /** Summarise the conversation to free the context window; absent while busy. */
+  onCompact?: () => Promise<void>;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [compacting, setCompacting] = React.useState(false);
+  const [compactError, setCompactError] = React.useState<string | null>(null);
+  const compact = async () => {
+    if (!onCompact || compacting) return;
+    setCompacting(true); setCompactError(null);
+    try { await onCompact(); setOpen(false); }
+    catch (e) { setCompactError(e instanceof Error ? e.message : String(e)); }
+    finally { setCompacting(false); }
+  };
   const { summary, loading, refresh } = useUsageSummary(open);
   const { models } = useVibeModels();
   const info = models.find(m => m.id === model);
@@ -219,6 +230,14 @@ export function UsageMeter({
                     </div>
                     {contextPercent != null && <Bar percent={contextPercent} label="Context window used" />}
                     <p className="mt-1 text-[11px] text-text-faint">{modelLabel(model, info?.name)}{contextLimit ? " · compacts automatically near the limit" : ""}</p>
+                    {onCompact && contextTokens > 0 && (
+                      <button type="button" disabled={compacting} onClick={() => void compact()}
+                        className="mt-2 inline-flex h-7 items-center gap-1.5 rounded-md border border-border px-2 text-xs text-text-muted transition-colors hover:bg-surface-muted hover:text-text disabled:opacity-50">
+                        {compacting ? <Loader2 size={12} className="animate-spin" /> : <Shrink size={12} />}
+                        {compacting ? "Compacting…" : "Compact now"}
+                      </button>
+                    )}
+                    {compactError && <p role="alert" className="mt-1 text-[11px] text-danger">{compactError}</p>}
                   </div>
                 )}
                 {sessionTokens != null && sessionTokens > 0 && (

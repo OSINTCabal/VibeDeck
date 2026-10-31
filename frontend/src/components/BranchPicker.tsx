@@ -8,16 +8,28 @@ import { getGitBranches, switchGitBranch, type GitBranches } from "@/lib/api";
  * git repository: lists local branches, switches, or creates a new one. Git
  * itself refuses a switch that would overwrite uncommitted changes.
  */
-export function BranchPicker({ cwd, className }: { cwd: string; className?: string }) {
+export function BranchPicker({ cwd, className, compact = false, align = "start", onRepo }: {
+  cwd: string; className?: string;
+  /** Small chip for the strip under the composer. */
+  compact?: boolean;
+  /** Which edge the menu lines up with. */
+  align?: "start" | "end";
+  /** Told whether ``cwd`` is a git repository, whenever that is known. */
+  onRepo?: (isRepo: boolean) => void;
+}) {
   const [info, setInfo] = React.useState<GitBranches | null>(null);
   const [open, setOpen] = React.useState(false);
   const [q, setQ] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
+  const onRepoRef = React.useRef(onRepo);
+  onRepoRef.current = onRepo;
   const load = React.useCallback(() => {
-    if (!cwd) { setInfo(null); return; }
-    getGitBranches(cwd).then(setInfo).catch(() => setInfo(null));
+    if (!cwd) { setInfo(null); onRepoRef.current?.(false); return; }
+    getGitBranches(cwd)
+      .then(d => { setInfo(d); onRepoRef.current?.(true); })
+      .catch(() => { setInfo(null); onRepoRef.current?.(false); });
   }, [cwd]);
 
   React.useEffect(() => { setInfo(null); setError(null); load(); }, [load]);
@@ -59,17 +71,18 @@ export function BranchPicker({ cwd, className }: { cwd: string; className?: stri
         onClick={() => { setOpen((o) => !o); setQ(""); setError(null); }}
         title={`Branch ${info.current || "(detached)"}${info.dirty ? " · uncommitted changes" : ""}`}
         aria-label="Select git branch"
-        className="flex items-center gap-1.5 h-8 max-w-[160px] rounded-md px-2.5 text-sm text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out"
+        className={cn("flex items-center gap-1.5 rounded-md text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out",
+          compact ? "h-7 max-w-[200px] px-2 text-xs" : "h-8 max-w-[160px] px-2.5 text-sm")}
       >
-        <GitBranch size={16} className="shrink-0" />
-        <span className="hidden truncate sm:inline">{info.current || "detached"}</span>
+        <GitBranch size={compact ? 13 : 16} className="shrink-0" />
+        <span className={cn("truncate", !compact && "hidden sm:inline")}>{info.current || "detached"}</span>
         {info.dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-label="Uncommitted changes" />}
-        <ChevronDown size={14} className="shrink-0 opacity-60" />
+        <ChevronDown size={compact ? 12 : 14} className="shrink-0 opacity-60" />
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div data-side="top" className="absolute left-0 bottom-full mb-2 z-50 w-72 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden">
+          <div data-side="top" className={cn("absolute bottom-full mb-2 z-50 w-72 max-w-[calc(100vw-2rem)] vd-menu rounded-xl border border-border bg-surface-raised shadow-lg overflow-hidden", align === "end" ? "right-0" : "left-0")}>
             <div className="flex items-center gap-2 px-3 border-b border-border">
               <Search size={13} className="text-text-faint shrink-0" />
               <input

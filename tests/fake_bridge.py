@@ -1,5 +1,6 @@
 """In-memory native RPC peer. Never starts a process or invokes a model."""
 import copy
+import os
 import time
 import uuid
 
@@ -34,8 +35,16 @@ class FakeBridge(VibeAppServer):
         sid = params.get("sessionId")
         if method == "session/start":
             sid = uuid.uuid4().hex
-            self.states[sid] = {"session": {"id": sid, "cwd": self.cwd, "title": "Test", "model": "mistral-large-4",
-                "agent": {"name": "accept-edits"}, "reasoningEffort": None, "status": {"type": "idle"}},
+            cwd = self.cwd
+            worktree = (params.get("agentConfig") or {}).get("worktree")
+            if worktree:
+                if not os.path.isdir(os.path.join(self.cwd, ".git")):
+                    raise BridgeError(-32602, "Not a git repository")
+                path = os.path.join(self.cwd, ".vibe-worktrees", "brave-otter")
+                os.makedirs(path, exist_ok=True)
+            self.states[sid] = {"session": {"id": sid, "cwd": cwd, "title": "Test", "model": "mistral-large-4",
+                "agent": {"name": "accept-edits"}, "reasoningEffort": None, "status": {"type": "idle"},
+                **({"worktree": {"name": "brave-otter", "branch": "vibe/brave-otter", "path": path, "created": True}} if worktree else {})},
                 "eventId": 0, "history": [], "turns": [], "activeCallbacks": [], "childSessions": []}
             return {"state": copy.deepcopy(self.states[sid])}
         if method in ("session/resume", "session/read"):
@@ -68,7 +77,26 @@ class FakeBridge(VibeAppServer):
         elif method == "turn/interrupt":
             self.states[sid]["session"]["status"] = {"type": "idle"}
         elif method == "workspace/git/worktrees/list":
-            return {"worktrees": []}
+            if not os.path.isdir(os.path.join(params["cwd"], ".git")):
+                return {"worktrees": []}
+            return {"repositoryRoot": params["cwd"], "worktrees": [
+                {"name": "brave-otter", "branch": "vibe/brave-otter", "cwd": os.path.join(params["cwd"], ".vibe-worktrees", "brave-otter"),
+                 "root": os.path.join(params["cwd"], ".vibe-worktrees", "brave-otter"), "repoRoot": params["cwd"],
+                 "branchChanges": {"additions": 3, "deletions": 1} if params.get("includeDetails") else None}]}
+        elif method == "workspace/git/worktrees/remove":
+            dirty = "dirty" in params["cwd"] and not params.get("force")
+            return {"outcome": "kept_dirty" if dirty else "removed", "reasons": ["uncommitted changes"] if dirty else []}
+        elif method == "workspace/git/worktrees/prune":
+            return {"removed": 2}
+        elif method == "workspace/git/worktrees/limit/update":
+            return {"limit": params["limit"], "failures": []}
+        elif method == "session/compact":
+            state = self.states[sid]
+            state["history"] = [{"id": "summary", "type": "notice", "text": "Conversation compacted"}]
+            for q in list(self._subscribers):
+                q.put_nowait({"method": "session/compacted", "params": {
+                    "eventId": 9, "sessionId": sid, "oldSessionId": sid, "summaryLength": 42, "state": copy.deepcopy(state)}})
+            return {"summary": "We fixed the tests.", "state": copy.deepcopy(state), "sessionLog": {}}
         elif method.startswith("vibeCode/"):
             return self._vibe_code(method, params)
         elif method.startswith("review/"):

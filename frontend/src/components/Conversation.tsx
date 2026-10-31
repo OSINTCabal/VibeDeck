@@ -1,16 +1,17 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, FolderTree, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
+import { BranchPicker } from "./BranchPicker";
 import { QueueBar } from "./QueueBar";
 import { ReviewPanel, pendingFiles } from "./ReviewPanel";
 import { RewindDialog } from "./RewindDialog";
 import { EntryBlock, MessageActions, StepGroup } from "./MessageBlocks";
 import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
-import { sendTurn, enqueueTurn, forkSession, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
+import { sendTurn, enqueueTurn, forkSession, compactSession, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
@@ -59,6 +60,8 @@ export function Conversation({ session }: { session: Session }) {
     return () => clearInterval(timer);
   }, [reviewOpen, running, loadReview]);
   const changedFiles = pendingFiles(review).length;
+  // the compacted history arrives on the event stream as a fresh snapshot
+  const compact = async () => { await compactSession(session.id); };
   const [rewindEntry, setRewindEntry] = React.useState<string | null>(null);
 
   // auto-scroll to bottom on new content — only when the user is already near
@@ -416,6 +419,8 @@ export function Conversation({ session }: { session: Session }) {
             onStop={stop}
             running={running}
             canQueue
+            tray={<SessionCheckout cwd={session.cwd} worktree={conv.session?.worktree} />}
+            onCompact={running || released ? undefined : compact}
             // while the agent works, keep typing the next queued message
             disabled={(sending && !running) || released}
             placeholder={`Message Vibe in ${session.cwd}…`}
@@ -425,7 +430,8 @@ export function Conversation({ session }: { session: Session }) {
             onReasoningChange={changeReasoning}
             agent={agent}
             onAgentChange={changeAgent}
-            contextTokens={conv.stats?.contextTokens ?? null}
+            // live stats arrive with turns; a reopened session reports its last context use
+            contextTokens={conv.stats?.contextTokens ?? conv.session?.contextUsage?.inputTokens ?? null}
             sessionTokens={conv.stats ? conv.stats.sessionPromptTokens + conv.stats.sessionCompletionTokens : null}
             footer={conv.stats ? (
               <div className="mt-2 flex items-center justify-end px-1 text-xs text-text-faint font-mono">
@@ -518,5 +524,20 @@ function SessionTitle({ session, renameRequest = 0 }: { session: Session; rename
       <span className="truncate">{session.title}</span>
       <Pencil size={14} className="shrink-0 text-text-faint opacity-0 group-hover:opacity-100 transition-opacity" />
     </button>
+  );
+}
+
+/** Where this session works: its folder or Vibe worktree, and the branch there. */
+function SessionCheckout({ cwd, worktree }: { cwd: string; worktree?: { name?: string; branch?: string; path?: string } | null }) {
+  const Icon = worktree?.name ? FolderTree : Folder;
+  return (
+    <>
+      <span className="flex h-7 min-w-0 items-center gap-1.5 px-2 text-xs text-text-muted" title={cwd}>
+        <Icon size={13} className="shrink-0" />
+        <span className="truncate">{worktree?.name ? `Worktree ${worktree.name}` : cwd.split("/").filter(Boolean).pop() || cwd}</span>
+      </span>
+      <div className="flex-1" />
+      <BranchPicker compact align="end" cwd={cwd} />
+    </>
   );
 }

@@ -359,9 +359,13 @@ class VibeAppServer:
 
     # ------------------------------------------------------------ sessions
 
-    async def start_session(self, history_limit: int = 200) -> dict:
-        """Start a fresh vibe session in this server's cwd. Returns session state."""
-        res = await self.call("session/start", {"historyLimit": history_limit})
+    async def start_session(self, history_limit: int = 200, worktree: Optional[dict] = None) -> dict:
+        """Start a fresh vibe session in this server's cwd, or in a new git
+        worktree of it (``{"kind": "auto"}``). Returns session state."""
+        params: dict = {"historyLimit": history_limit}
+        if worktree:
+            params["agentConfig"] = {"worktree": worktree}
+        res = await self.call("session/start", params)
         state = res.get("state", {})
         self.session_id = state.get("session", {}).get("id")
         self.last_event_id = state.get("eventId", 0)

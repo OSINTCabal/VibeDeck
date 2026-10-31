@@ -8,6 +8,7 @@ import { Composer, type ImageAttachment } from "@/components/Composer";
 import { MistralLogo } from "@/components/Logo";
 import { ProjectPicker, rememberCwd } from "@/components/ProjectPicker";
 import { BranchPicker } from "@/components/BranchPicker";
+import { CheckoutPicker } from "@/components/CheckoutPicker";
 import { LANE_AGENT } from "@/hooks/useSessions";
 import { patchSession, sendTurn } from "@/lib/api";
 import type { Lane } from "@/lib/types";
@@ -50,7 +51,14 @@ export function Welcome() {
   React.useEffect(() => { if (params.has("project")) setCwd(params.get("project") || ""); }, [params]);
   const [text, setText] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const pending = React.useRef<{ id: string; requestId: string; payload: string; cwd: string; lane: Lane; agent: string; model: string; reasoning: string | null } | null>(null);
+  const pending = React.useRef<{ id: string; requestId: string; payload: string; cwd: string; lane: Lane; agent: string; model: string; reasoning: string | null; worktree: boolean } | null>(null);
+  // Code sessions can start in a fresh git worktree on their own branch
+  const [worktree, setWorktree] = React.useState(() => localStorage.getItem("vibedeck.worktree") === "1");
+  const [isRepo, setIsRepo] = React.useState(false);
+  const changeWorktree = (on: boolean) => {
+    setWorktree(on);
+    try { localStorage.setItem("vibedeck.worktree", on ? "1" : "0"); } catch { /* storage unavailable */ }
+  };
   const sending = React.useRef(false);
   const [error, setError] = React.useState<string | null>(null);
   const [model, setModel] = React.useState(
@@ -79,14 +87,14 @@ export function Welcome() {
         rememberCwd(cwd || "");
         const res = await fetch("/api/sessions", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ cwd: cwd || undefined, lane, agent, model, reasoning }),
+          body: JSON.stringify({ cwd: cwd || undefined, lane, agent, model, reasoning, worktree: lane === "code" && isRepo && worktree }),
         });
         if (!res.ok) throw new Error(await res.text());
         const s = await res.json();
-        pending.current = { id: s.id, requestId: crypto.randomUUID(), payload, cwd, lane, agent, model, reasoning };
+        pending.current = { id: s.id, requestId: crypto.randomUUID(), payload, cwd, lane, agent, model, reasoning, worktree: lane === "code" && isRepo && worktree };
       }
       const session = pending.current;
-      if (session.cwd !== cwd || session.lane !== lane) {
+      if (session.cwd !== cwd || session.lane !== lane || session.worktree !== (lane === "code" && isRepo && worktree)) {
         throw new Error("This session started in another project or mode. Open it to continue, or start a new session.");
       }
       if (session.agent !== agent || session.model !== model || session.reasoning !== reasoning) {
@@ -140,7 +148,12 @@ export function Welcome() {
               onReasoningChange={setReasoning}
               agent={agent}
               onAgentChange={setAgent}
-              extraLeft={<><ProjectPicker cwd={cwd} onChange={setCwd} /><BranchPicker cwd={cwd} /></>}
+              tray={<>
+                <ProjectPicker compact cwd={cwd} onChange={setCwd} />
+                {lane === "code" && isRepo && <CheckoutPicker worktree={worktree} onChange={changeWorktree} />}
+                <div className="flex-1" />
+                <BranchPicker compact align="end" cwd={cwd} onRepo={setIsRepo} />
+              </>}
               footer={error && pending.current ? (
                 <div className="mt-2 flex flex-wrap items-center gap-2 px-1 text-xs">
                   <button type="button" onClick={() => navigate(`/sessions/${pending.current!.id}`)} className="rounded-md border border-border px-2 py-1 hover:bg-surface-muted">Open created session</button>

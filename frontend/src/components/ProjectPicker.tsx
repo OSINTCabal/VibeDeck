@@ -48,11 +48,13 @@ function baseName(path: string): string {
  * (Electron shell), and a manual path input (always available).
  */
 export function ProjectPicker({
-  cwd, onChange, className,
+  cwd, onChange, className, compact = false,
 }: {
   cwd: string;
   onChange: (v: string) => void;
   className?: string;
+  /** Small chip for the strip under the composer. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = React.useState(false);
   const [editing, setEditing] = React.useState(false);
@@ -192,11 +194,12 @@ export function ProjectPicker({
         onClick={() => { setOpen((o) => !o); setQ(""); }}
         title={cwd || "Select project"}
         aria-label="Select project directory"
-        className="flex items-center gap-1.5 h-8 max-w-[180px] rounded-md px-2.5 text-sm text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out"
+        className={cn("flex items-center gap-1.5 rounded-md text-text-muted hover:bg-surface-muted hover:text-text transition-colors duration-75 ease-out",
+          compact ? "h-7 max-w-[200px] px-2 text-xs" : "h-8 max-w-[180px] px-2.5 text-sm")}
       >
-        <FolderOpen size={16} className="shrink-0" />
-        <span className="hidden truncate sm:inline">{cwd ? baseName(cwd) : "Select project"}</span>
-        <ChevronDown size={14} className="shrink-0 opacity-60" />
+        <FolderOpen size={compact ? 13 : 16} className="shrink-0" />
+        <span className={cn("truncate", !compact && "hidden sm:inline")}>{cwd ? baseName(cwd) : "Select project"}</span>
+        <ChevronDown size={compact ? 12 : 14} className="shrink-0 opacity-60" />
       </button>
       {open && (
         <>

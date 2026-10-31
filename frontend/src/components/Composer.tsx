@@ -49,7 +49,7 @@ export function Composer({
   running = false, canQueue = false, disabled = false,
   placeholder = "Type / for quick access",
   model, onModelChange, agent, onAgentChange,
-  extraLeft, footer, className, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange,
+  extraLeft, tray, footer, className, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange, onCompact,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -65,6 +65,8 @@ export function Composer({
   agent: string;
   onAgentChange: (v: string) => void;
   extraLeft?: React.ReactNode;
+  /** Strip under the box for where the work happens (project, checkout, branch). */
+  tray?: React.ReactNode;
   footer?: React.ReactNode;
   className?: string;
   sendError?: string | null;
@@ -72,6 +74,7 @@ export function Composer({
   sessionTokens?: number | null;
   reasoning?: string | null;
   onReasoningChange?: (v: string | null) => void;
+  onCompact?: () => Promise<void>;
 }) {
   const taRef = React.useRef<HTMLTextAreaElement>(null);
   const fileRef = React.useRef<HTMLInputElement>(null);
@@ -207,7 +210,8 @@ export function Composer({
           className="w-full bg-transparent px-4 pt-4 pb-0 text-base leading-6 text-text placeholder:text-text-muted resize-none focus:outline-none max-h-48"
           style={{ minHeight: 40 }}
         />
-        <div className="flex items-center gap-1 px-3 pt-3 pb-3">
+        {/* wraps on narrow windows instead of pushing the send button out of the box */}
+        <div className="flex flex-wrap items-center gap-x-1 gap-y-1 px-3 pt-3 pb-3">
           <input
             ref={fileRef}
             type="file"
@@ -229,8 +233,8 @@ export function Composer({
           </button>
           {extraLeft}
           <AgentPicker value={agent} onChange={onAgentChange} />
-          <div className="flex-1" />
-          <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} />
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} onCompact={onCompact} />
           {onReasoningChange && <EffortPicker model={model} value={reasoning ?? null} onChange={onReasoningChange} />}
           <ModelPicker value={model} onChange={onModelChange} />
           {running && canQueue && (value.trim() || images.length > 0) && (
@@ -267,8 +271,14 @@ export function Composer({
               {disabled ? <Loader2 size={16} className="animate-spin" /> : <ArrowUp size={16} strokeWidth={2} />}
             </button>
           )}
+          </div>
         </div>
       </div>
+      {tray && (
+        <div className="mx-3 flex items-center gap-1 rounded-b-xl border border-t-0 border-border bg-surface/50 px-1.5 py-1">
+          {tray}
+        </div>
+      )}
       {footer}
     </div>
   );

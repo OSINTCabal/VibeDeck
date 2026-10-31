@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
   Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
-  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History, GitFork,
+  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History, GitFork, Shrink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, usePresence } from "./ui";
@@ -424,6 +424,24 @@ export function NoticeBlock({ e }: { e: HistoryEntry }) {
   );
 }
 
+/** A point where Vibe changed the conversation: a compaction or a rewind. */
+export function CheckpointDivider({ e }: { e: HistoryEntry }) {
+  const kind = (e as { kind?: string }).kind;
+  const running = e.generationStatus && e.generationStatus !== "completed";
+  const label = (e as { message?: string }).message
+    || (kind === "compaction" ? "Context compacted" : kind === "rewind" ? "Conversation rewound" : "Checkpoint");
+  return (
+    <div role="separator" aria-label={label} className="flex items-center gap-3 px-6 py-3 text-xs text-text-faint">
+      <span className="h-px flex-1 bg-border" />
+      <span className="flex items-center gap-1.5">
+        {running ? <Loader2 size={12} className="animate-spin" /> : kind === "compaction" ? <Shrink size={12} /> : <History size={12} />}
+        {running && kind === "compaction" ? "Compacting context…" : label}
+      </span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- dispatcher
 
 // Memoized: while a turn streams, only the updated entry gets a new object
@@ -448,6 +466,8 @@ export const EntryBlock = React.memo(function EntryBlock({
         ? <ApprovalCard e={e} onResolve={onResolve} /> : <div role="alert" className="px-6 py-2 text-sm text-danger">This prompt requires a newer VibeDeck client. Stop the turn and resume in the CLI.</div>;
     case "notice":
       return <NoticeBlock e={e} />;
+    case "checkpoint":
+      return <CheckpointDivider e={e} />;
     default:
       return (
         <div className="px-6 py-1 text-xs text-text-faint font-mono">
