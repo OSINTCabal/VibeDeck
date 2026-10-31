@@ -87,13 +87,13 @@ def info(app_server: Optional[str]) -> dict:
 def release_notes(app_server: Optional[str]) -> list[dict]:
     """Markdown release notes bundled with Vibe, newest first.
 
-    Vibe ships ``whats_new.md`` for its own version; newer releases may also
-    bundle notes for earlier versions under ``release_notes/``.
+    Vibe up to 3.0.3 ships ``whats_new.md`` for its own version; 3.0.4 and
+    later ship one ``whats_new/<version>.md`` per release, without a heading.
     """
     pkg = package_dir(app_server)
     if pkg is None:
         return []
-    files = [pkg / "whats_new.md", *(pkg / "release_notes").glob("*.md")]
+    files = [pkg / "whats_new.md", *(pkg / "whats_new").glob("*.md"), *(pkg / "release_notes").glob("*.md")]
     notes: dict[str, dict] = {}
     for path in files:
         try:
@@ -104,6 +104,8 @@ def release_notes(app_server: Optional[str]) -> list[dict]:
             continue
         ver = parse_version(text.splitlines()[0]) or parse_version(path.stem)
         key = ".".join(map(str, ver)) if ver else path.stem
+        if not text.startswith("#"):
+            text = f"# What's new in v{key}\n\n{text}"
         notes.setdefault(key, {"version": key, "markdown": text, "_order": ver or (0,)})
     ordered = sorted(notes.values(), key=lambda n: n["_order"], reverse=True)
     return [{"version": n["version"], "markdown": n["markdown"]} for n in ordered]

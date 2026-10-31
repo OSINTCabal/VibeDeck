@@ -42,12 +42,14 @@ def test_release_notes_newest_first(tmp_path):
     server = _install(tmp_path, "3.0.4", {
         "whats_new.md": "# What's new in v3.0.4\n\n- Release notes view\n",
         "release_notes/3.0.2.md": "# What's new in v3.0.2\n\n- Older\n",
+        "whats_new/2.9.0.md": "- Headless file named by version\n",
         "release_notes/3.0.4.md": "# duplicate of whats_new\n",
         "release_notes/3.0.10.md": "# What's new in v3.0.10\n",
     })
     notes = vibe_install.release_notes(server)
-    assert [n["version"] for n in notes] == ["3.0.10", "3.0.4", "3.0.2"]
+    assert [n["version"] for n in notes] == ["3.0.10", "3.0.4", "3.0.2", "2.9.0"]
     assert "Release notes view" in notes[1]["markdown"]
+    assert notes[3]["markdown"].startswith("# What's new in v2.9.0\n\n- Headless")
 
 
 @pytest.mark.parametrize("level,ok", [
