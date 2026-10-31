@@ -188,7 +188,7 @@ function sunset(): Scene {
     step() {},
     paint(ctx, t, work) {
       const cols = Math.ceil(w / C);
-      const rows = Math.max(4, Math.ceil((h * 0.2) / C));
+      const rows = Math.max(4, Math.ceil((h * 0.13) / C));
       const amp = 1.4 + work * 1.6;
       for (let i = 0; i < cols; i++) {
         const top = Math.round(rows * 0.5 + amp * Math.sin(i * 0.18 + t * 0.5) + amp * 0.7 * Math.sin(i * 0.07 - t * 0.3));

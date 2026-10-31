@@ -198,7 +198,7 @@ export function Welcome() {
                 <button
                   key={c.label}
                   onClick={() => setText(c.label)}
-                  className="flex-1 min-w-[200px] rounded-xl border border-border px-4 py-3.5 text-left text-text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-text vd-reveal"
+                  className="flex-1 min-w-[200px] rounded-xl border border-border bg-bg px-4 py-3.5 text-left text-text-muted transition-colors duration-150 hover:bg-surface-muted hover:text-text vd-reveal"
                   style={{ animationDelay: `${210 + i * 70}ms` }}
                 >
                   <c.icon size={16} className="block mb-2.5" />
