@@ -256,7 +256,8 @@ export function EffortPicker({
   const [open, setOpen] = React.useState(false);
   const btnRef = React.useRef<HTMLButtonElement>(null);
   const info = models.find(m => m.id === model);
-  const levels = (info?.thinkingLevels || []).filter(l => l in EFFORT_LABELS);
+  // Vibe 3.0.4+ lets a model list levels of its own ("turbo", "minimal"…)
+  const levels = (info?.thinkingLevels || []).filter(l => /^[a-z][a-z0-9_-]{0,31}$/.test(l));
   const { placement } = useDropdownPlacement(open, btnRef, 220);
   const presence = usePresence(open);
 

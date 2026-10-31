@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts,
+  StudioCosts, VibeReleaseNotes,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -32,6 +32,7 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 // ---------------------------------------------------------------- health/config
 
 export const getHealth = () => http<Health>("/api/health");
+export const getVibeReleaseNotes = () => http<VibeReleaseNotes>("/api/vibe/release-notes");
 export const getConfig = () => http<AppConfig>("/api/config");
 export const patchConfig = (body: Partial<AppConfig>) =>
   http<AppConfig>("/api/config", { method: "PATCH", body: JSON.stringify(body) });

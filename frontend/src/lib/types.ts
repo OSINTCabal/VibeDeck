@@ -69,7 +69,20 @@ export interface Health {
   default_model: string;
   default_agent: string;
   version: string;
+  vibe?: VibeInstall;
   user?: string;
+}
+
+/** The installed Vibe CLI and whether it is older than VibeDeck expects. */
+export interface VibeInstall {
+  version: string | null;
+  recommended: string;
+  outdated: boolean;
+  upgradeCommand: string;
+}
+
+export interface VibeReleaseNotes extends VibeInstall {
+  notes: { version: string; markdown: string }[];
 }
 
 /** Where the effective Mistral API key comes from — never includes the key itself. */

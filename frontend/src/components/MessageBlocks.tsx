@@ -117,6 +117,15 @@ function CodeBlock({ children, ...rest }: React.HTMLAttributes<HTMLPreElement>) 
 const markdownComponents = { pre: CodeBlock };
 const rehypePlugins: React.ComponentProps<typeof ReactMarkdown>["rehypePlugins"] = [[rehypeHighlight, { detect: false }]];
 
+/** Markdown rendered the way assistant messages are. */
+export function Markdown({ text, className }: { text: string; className?: string }) {
+  return (
+    <div className={cn("prose-vd", className)}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- User / Assistant message
 
 export function MessageEntry({ e, reveal = true }: { e: HistoryEntry; reveal?: boolean }) {

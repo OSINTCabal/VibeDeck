@@ -38,6 +38,8 @@ import cloud_teleport
 import git_projects
 import httpx
 import providers as provider_config
+import session_rpc
+import vibe_install
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
 from agent_routing import write_settings as write_agent_settings
@@ -82,6 +84,7 @@ from vibe_bridge import (
     BridgeError,
     SessionManager,
     find_app_server,
+    valid_reasoning,
 )
 from vibe_sessions import LISTER_KEY, VibeSessionSync, cleanup_store_dir
 
@@ -306,6 +309,10 @@ def _live_sids() -> set:
 async def _ensure_bridge(sid: str) -> tuple[Any, str]:
     async with _session_lock(sid):
         return await _open_session(sid)
+
+
+# looked up per call so tests can patch _ensure_bridge
+session_rpc.configure(lambda sid: _ensure_bridge(sid))
 
 
 async def _open_session(sid: str) -> tuple[Any, str]:
@@ -543,8 +550,18 @@ async def health() -> dict:
         "default_model": DEFAULT_MODEL,
         "default_agent": DEFAULT_AGENT,
         "version": "1.1.0",
+        "vibe": vibe_install.info(srv),
         "user": getpass.getuser(),
     }
+
+
+@app.get("/api/vibe/release-notes")
+async def vibe_release_notes() -> dict:
+    try:
+        srv = find_app_server()
+    except FileNotFoundError:
+        srv = None
+    return {**vibe_install.info(srv), "notes": vibe_install.release_notes(srv)}
 
 
 # ---- API key management (add / remove at will; the key itself is never returned)
@@ -1006,8 +1023,8 @@ async def patch_config(c: ConfigPatch) -> dict:
         known = await _known_agent_names()
         if c.default_agent not in known:
             raise HTTPException(400, f"unknown agent '{c.default_agent}'. Available: {', '.join(sorted(known))}")
-    if c.default_reasoning is not None and c.default_reasoning not in REASONING_LEVELS:
-        raise HTTPException(400, f"reasoning must be one of {REASONING_LEVELS}")
+    if c.default_reasoning is not None and not valid_reasoning(c.default_reasoning):
+        raise HTTPException(400, "invalid reasoning level")
     if c.default_model is not None:
         models = await _read_vibe_models()
         if models and c.default_model not in {m["id"] for m in models}:
@@ -1029,7 +1046,7 @@ async def create_session(s: SessionCreate) -> dict:
     s.model = s.model or store.get_config("default_model", DEFAULT_MODEL)
     if "reasoning" not in s.model_fields_set:
         s.reasoning = store.get_config("default_reasoning", None)
-    if s.reasoning is not None and s.reasoning not in REASONING_LEVELS:
+    if s.reasoning is not None and not valid_reasoning(s.reasoning):
         raise HTTPException(400, "invalid reasoning level")
     known = await _known_agent_names()
     if s.agent not in known:
@@ -1183,7 +1200,7 @@ async def patch_session(sid: str, p: SessionPatch) -> dict:
 
 
 async def _patch_session(sid: str, p: SessionPatch) -> dict:
-    if p.reasoning is not None and p.reasoning not in REASONING_LEVELS:
+    if p.reasoning is not None and not valid_reasoning(p.reasoning):
         raise HTTPException(400, "invalid reasoning level")
     if p.agent is not None and p.agent not in await _known_agent_names():
         raise HTTPException(400, "unknown agent")
@@ -1818,12 +1835,7 @@ class CloudPushReq(BaseModel):
     approved: StrictBool
 
 
-async def _cloud_call(sid: str, method: str, params: dict, timeout: float = 90.0) -> tuple[Any, str, Any]:
-    bridge, esid = await _ensure_bridge(sid)
-    try:
-        return bridge, esid, await bridge.call(method, {"sessionId": esid, **params}, timeout=timeout)
-    except BridgeError as e:
-        raise HTTPException(409, e.message) from e
+_cloud_call = session_rpc.session_call
 
 
 @app.post("/api/sessions/{sid}/cloud/open")

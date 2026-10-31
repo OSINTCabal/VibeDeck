@@ -7,6 +7,7 @@ import {
 import { Card, CardBody, Select, Badge, Button, Input } from "@/components/ui";
 import { useVibeModels } from "@/components/Pickers";
 import { ProvidersSection } from "@/components/ProvidersSection";
+import { VibeReleaseNotes } from "@/components/VibeReleaseNotes";
 import { THEMES, getTheme, setTheme, type ThemeId } from "@/lib/theme";
 import {
   notificationsEnabled, setNotificationsEnabled, notificationsSupported,
@@ -44,6 +45,7 @@ function keySourceLabel(source: ApiKeyStatus["source"]): string {
 
 export function SettingsView() {
   const { health, config } = useOutletContext<any>();
+  const [notesOpen, setNotesOpen] = React.useState(false);
   const [params] = useSearchParams();
   const section = params.get("section") === "models" ? "models" : params.get("section") === "config" ? "config" : "providers";
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -285,7 +287,21 @@ export function SettingsView() {
               tone={health?.api_key ? "success" : "warning"}
             />
             <Row label="Version" value={`vibedeck ${health?.version || "—"}`} />
+            <div className="flex items-center justify-between">
+              <span className="text-text-muted">Vibe</span>
+              <span className="flex items-center gap-2">
+                {health?.vibe?.outdated && <Badge tone="warning">{health.vibe.recommended} available</Badge>}
+                <span className="font-mono text-xs">{health?.vibe?.version || "—"}</span>
+                <button type="button" onClick={() => setNotesOpen(true)} className="text-xs text-primary hover:underline">What’s new</button>
+              </span>
+            </div>
+            {health?.vibe?.outdated && (
+              <p className="text-xs text-text-faint">
+                Update with <code className="font-mono">{health.vibe.upgradeCommand}</code> for custom thinking levels and teleport fixes.
+              </p>
+            )}
           </div>
+          <VibeReleaseNotes open={notesOpen} onClose={() => setNotesOpen(false)} />
         </CardBody>
       </Card>
 
