@@ -17,8 +17,6 @@ Dev:  python3 -m uvicorn vibedeck_server:app --host 127.0.0.1 --port 9377
 from __future__ import annotations
 
 import asyncio
-import base64
-import binascii
 import getpass
 import hashlib
 import json
@@ -40,6 +38,7 @@ import httpx
 import providers as provider_config
 import review
 import session_rpc
+import turn_queue
 import vibe_install
 from agent_routing import AgentSettings
 from agent_routing import read_settings as read_agent_settings
@@ -75,6 +74,7 @@ from providers import (
 )
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 from store import Store
+from turn_input import validate_images
 from usage import UsageReader
 from vibe_bridge import (
     AGENT_MODES,
@@ -292,6 +292,8 @@ def normalize_notification(msg: dict) -> dict:
         return {"kind": "childSession", "childSession": p.get("childSession", {})}
     if method == "callback/requested":
         return {"kind": "callback", "callback": p.get("callback", {})}
+    if method == "turn/queueUpdated":
+        return turn_queue.queue_event(p) or {"kind": "raw", "method": method, "params": p}
     return {"kind": "raw", "method": method, "params": p}
 
 
@@ -513,6 +515,7 @@ app.add_middleware(
 )
 # feature routers; included first so the catch-all /api route never shadows them
 app.include_router(review.router)
+app.include_router(turn_queue.router)
 
 
 @app.middleware("http")
@@ -1274,6 +1277,43 @@ async def resume_session(sid: str) -> dict:
     return _public_session(store.get_session(sid))
 
 
+class ForkReq(BaseModel):
+    entry_id: Optional[str] = Field(None, alias="entryId", max_length=256)
+
+
+@app.post("/api/sessions/{sid}/fork")
+async def fork_session(sid: str, r: ForkReq) -> dict:
+    """Branch the conversation into a new session: the whole history, or up to
+    and including the turn of ``entryId``. The original stays as it is."""
+    row = store.get_session(sid)
+    if row is None:
+        raise HTTPException(404, "session not found")
+    params: dict[str, Any] = {"attach": False, "idempotencyKey": uuid.uuid4().hex}
+    if r.entry_id:
+        params["entryId"] = r.entry_id
+    bridge, esid = await _ensure_bridge(sid)
+    try:
+        res = await bridge.call("session/fork", {"sourceSessionId": esid, **params}, timeout=120)
+    except BridgeError as e:
+        if "Cannot find user entry" in e.message:
+            raise HTTPException(409, "This message was sent before VibeDeck recorded message ids, so Vibe "
+                                     "cannot fork from it. Fork the whole session instead.") from e
+        raise HTTPException(409, e.message) from e
+    session = ((res or {}).get("state") or {}).get("session") or {}
+    new_id = session.get("id")
+    if not isinstance(new_id, str) or not new_id:
+        raise HTTPException(502, "Vibe did not return the forked session")
+    agent = session.get("agent")
+    store.upsert_session(new_id, title=f"{row.get('title') or 'Session'} (fork)", cwd=session.get("cwd") or row["cwd"],
+                         agent=(agent.get("name") if isinstance(agent, dict) else agent) or row.get("agent"),
+                         model=session.get("model") or row.get("model"),
+                         reasoning=session.get("reasoningEffort", row.get("reasoning")),
+                         lane=row.get("lane") or "code", status="idle", warnings="[]")
+    store.upsert_costs(new_id, {})
+    store.audit("session.fork", f"{sid} -> {new_id}")
+    return _public_session(store.get_session(new_id))
+
+
 @app.post("/api/sessions/{sid}/release")
 async def release_session(sid: str) -> dict:
     async with _session_lock(sid, turns=True), _session_lock(sid):
@@ -1312,20 +1352,10 @@ async def _release_session(sid: str) -> dict:
 async def send_turn(sid: str, t: TurnReq) -> dict:
     if not t.text.strip() and not t.images:
         raise HTTPException(400, "message is empty")
-    if len(t.images) > 8:
-        raise HTTPException(400, "attach up to 8 images")
-    for image in t.images:
-        source = image.get("source") or {}
-        if not isinstance(source, dict):
-            raise HTTPException(400, "image source must be an inline image object")
-        data = source.get("data")
-        if source.get("kind") != "inline" or image.get("mimeType") not in ("image/png", "image/jpeg", "image/webp", "image/gif") or not isinstance(data, str) or len(data) > 14 * 1024 * 1024:
-            raise HTTPException(400, "images must be PNG, JPEG, WebP or GIF up to 10 MB")
-        try:
-            if len(base64.b64decode(data, validate=True)) > 10 * 1024 * 1024:
-                raise ValueError("too large")
-        except (ValueError, binascii.Error):
-            raise HTTPException(400, "invalid image data") from None
+    try:
+        validate_images(t.images)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from None
     payload_hash = hashlib.sha256(json.dumps([t.text, t.images], sort_keys=True).encode()).hexdigest()
     async with _session_lock(sid, turns=True):
         previous = store.get_turn_request(sid, t.request_id)

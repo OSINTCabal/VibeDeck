@@ -73,6 +73,19 @@ class FakeBridge(VibeAppServer):
             return self._vibe_code(method, params)
         elif method.startswith("review/"):
             return self._review(method, params)
+        elif method.startswith("session/turn/"):
+            return self._queue(method, params)
+        elif method == "session/fork":
+            source = self.states[params["sourceSessionId"]]
+            fork_id = uuid.uuid4().hex
+            state = copy.deepcopy(source)
+            state["session"].update(id=fork_id, status={"type": "idle"})
+            if params.get("entryId"):
+                index = next(i for i, e in enumerate(state["history"]) if e["id"] == params["entryId"])
+                state["history"] = state["history"][:index + 1]
+            self.states[fork_id] = state
+            self.forks = [*getattr(self, "forks", []), params]
+            return {"sourceSessionId": params["sourceSessionId"], "state": copy.deepcopy(state)}
         elif method == "session/rewind/read":
             return {"hasFileChanges": True, "paths": [f"{self.cwd}/a.py"]}
         elif method == "session/rewind":
@@ -86,6 +99,36 @@ class FakeBridge(VibeAppServer):
                     "restoredPaths": [f"{self.cwd}/a.py"] if params.get("restoreFiles") else [],
                     "state": copy.deepcopy(self.states[sid]), "sessionLog": {}}
         return {}
+
+    def _queue(self, method, params):
+        """A turn queue: enqueue starts at once when idle, otherwise waits."""
+        state = self.states[params["sessionId"]]
+        queue = state.setdefault("turnQueue", {"items": [], "paused": False, "maxItems": 32})
+        result = {}
+        if method == "session/turn/enqueue":
+            item = {"id": f"q{len(queue['items']) + 1}-{uuid.uuid4().hex[:6]}", "createdAt": 1, "entries": params["entries"]}
+            if state["session"]["status"]["type"] == "idle" and not queue["items"]:
+                state["session"]["status"] = {"type": "running", "activeTurnId": "turn-q"}
+                return {"queueItemId": item["id"]}
+            queue["items"].append(item)
+            result = {"queueItemId": item["id"], "waits": True}
+        elif method == "session/turn/queue/replace":
+            item = next(i for i in queue["items"] if i["id"] == params["queueItemId"])
+            item["entries"] = params["entries"]
+        elif method == "session/turn/queue/remove":
+            queue["items"] = [i for i in queue["items"] if i["id"] != params["queueItemId"]]
+        elif method == "session/turn/queue/steer":
+            if state["session"]["status"].get("activeTurnId") != params["expectedTurnId"]:
+                raise BridgeError(-32010, "The running turn changed")
+            queue["items"] = [i for i in queue["items"] if i["id"] != params["queueItemId"]]
+            result = {"queueItemId": params["queueItemId"], "turnId": params["expectedTurnId"]}
+        elif method == "session/turn/queue/resume":
+            queue["paused"] = False
+        elif method == "session/turn/queue/read":
+            return {"queue": copy.deepcopy(queue)}
+        for q in list(self._subscribers):
+            q.put_nowait({"method": "turn/queueUpdated", "params": {"sessionId": params["sessionId"], "queue": copy.deepcopy(queue)}})
+        return result
 
     def _review(self, method, params):
         review = FakeBridge.review

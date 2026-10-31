@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowUp, Loader2, Plus, Square, X } from "lucide-react";
+import { ArrowUp, ListPlus, Loader2, Plus, Square, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AgentPicker, EffortPicker, ModelPicker } from "./Pickers";
 import { UsageMeter } from "./UsageMeter";
@@ -46,7 +46,7 @@ function readImage(file: File): Promise<PendingImage> {
  */
 export function Composer({
   value, onChange, onSend, onStop,
-  running = false, disabled = false,
+  running = false, canQueue = false, disabled = false,
   placeholder = "Type / for quick access",
   model, onModelChange, agent, onAgentChange,
   extraLeft, footer, className, sendError, contextTokens, sessionTokens, reasoning, onReasoningChange,
@@ -56,6 +56,8 @@ export function Composer({
   onSend: (text: string, images: ImageAttachment[]) => void | Promise<void>;
   onStop?: () => void;
   running?: boolean;
+  /** While running, sending queues the message to run after the turn. */
+  canQueue?: boolean;
   disabled?: boolean;
   placeholder?: string;
   model: string;
@@ -87,7 +89,7 @@ export function Composer({
   }, [value]);
 
   const send = async () => {
-    if ((!value.trim() && images.length === 0) || running || disabled || sendLock.current) return;
+    if ((!value.trim() && images.length === 0) || (running && !canQueue) || disabled || sendLock.current) return;
     sendLock.current = true;
     setSending(true);
     setError(null);
@@ -201,7 +203,7 @@ export function Composer({
           onPaste={onPaste}
           placeholder={placeholder}
           rows={1}
-          disabled={sending || disabled}
+          disabled={(sending && !running) || disabled}
           className="w-full bg-transparent px-4 pt-4 pb-0 text-base leading-6 text-text placeholder:text-text-muted resize-none focus:outline-none max-h-48"
           style={{ minHeight: 40 }}
         />
@@ -231,6 +233,18 @@ export function Composer({
           <UsageMeter model={model} contextTokens={contextTokens} sessionTokens={sessionTokens} />
           {onReasoningChange && <EffortPicker model={model} value={reasoning ?? null} onChange={onReasoningChange} />}
           <ModelPicker value={model} onChange={onModelChange} />
+          {running && canQueue && (value.trim() || images.length > 0) && (
+            <button
+              type="button"
+              onClick={send}
+              disabled={disabled || sending}
+              title="Queue to run after this turn (Enter)"
+              aria-label="Queue message"
+              className="ml-1 h-8 w-8 shrink-0 grid place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text disabled:opacity-40"
+            >
+              <ListPlus size={16} />
+            </button>
+          )}
           {running ? (
             <button
               type="button"

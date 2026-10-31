@@ -2,7 +2,7 @@ import type {
   AppConfig, Health, Session, SseEvent, ModelInfo, SkillInfo,
   McpServerInfo, AgentInfo, JsonPatchOp, ApiKeyStatus,
   ProvidersView, ProviderInfo, ProviderKeyStatus, ProviderModelInfo,
-  StudioCosts, VibeReleaseNotes,
+  StudioCosts, VibeReleaseNotes, TurnQueue,
 } from "./types";
 
 // In production the sidecar serves the SPA on the same origin (no prefix).
@@ -346,3 +346,20 @@ export const previewRewind = (sid: string, entryId: string) =>
 export const rewindTo = (sid: string, entryId: string, restoreFiles: boolean) =>
   http<{ message: string; restoredPaths: string[]; restoreErrors: string[] }>(
     `/api/sessions/${sid}/rewind/${encodeURIComponent(entryId)}`, { method: "POST", body: JSON.stringify({ restoreFiles }) });
+
+// ---------------------------------------------------------------- turn queue and fork
+
+const queueBody = (text: string, images: unknown[], requestId?: string) =>
+  JSON.stringify({ text, images, ...(requestId ? { requestId } : {}) });
+export const enqueueTurn = (sid: string, text: string, images: unknown[] = [], requestId?: string) =>
+  http<{ queueItemId: string; waits: boolean }>(`/api/sessions/${sid}/queue`, { method: "POST", body: queueBody(text, images, requestId) });
+export const replaceQueued = (sid: string, itemId: string, text: string) =>
+  http<TurnQueue>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}`, { method: "PUT", body: queueBody(text, []) });
+export const removeQueued = (sid: string, itemId: string) =>
+  http<TurnQueue>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}`, { method: "DELETE" });
+export const steerQueued = (sid: string, itemId: string, expectedTurnId: string) =>
+  http<{ queueItemId: string; turnId: string }>(`/api/sessions/${sid}/queue/${encodeURIComponent(itemId)}/steer`,
+    { method: "POST", body: JSON.stringify({ expectedTurnId }) });
+export const resumeQueue = (sid: string) => http<TurnQueue>(`/api/sessions/${sid}/queue/resume`, { method: "POST" });
+export const forkSession = (sid: string, entryId?: string) =>
+  http<Session>(`/api/sessions/${sid}/fork`, { method: "POST", body: JSON.stringify(entryId ? { entryId } : {}) });

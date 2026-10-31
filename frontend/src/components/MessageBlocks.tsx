@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import {
   Lightbulb, Wrench, ShieldCheck, ChevronRight, Terminal, FileCode2,
-  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History,
+  Loader2, X, Sparkles, Copy, Check, Pencil, RotateCcw, History, GitFork,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Badge, usePresence } from "./ui";
@@ -51,6 +51,7 @@ export const MessageActions = React.createContext<{
   onEdit?: (text: string) => void;
   onResend?: (text: string) => void;
   onRewind?: (entryId: string) => void;
+  onFork?: (entryId: string) => void;
 }>({});
 
 function useCopy(): [boolean, (text: string) => void] {
@@ -69,7 +70,7 @@ function useCopy(): [boolean, (text: string) => void] {
 const actionBtn = "grid h-7 w-7 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text";
 
 function ActionBar({ text, user, id }: { text: string; user: boolean; id?: string }) {
-  const { onEdit, onResend, onRewind } = React.useContext(MessageActions);
+  const { onEdit, onResend, onRewind, onFork } = React.useContext(MessageActions);
   const [copied, copy] = useCopy();
   if (!text) return null;
   return (
@@ -82,6 +83,7 @@ function ActionBar({ text, user, id }: { text: string; user: boolean; id?: strin
       </button>
       {user && onEdit && <button type="button" onClick={() => onEdit(text)} className={actionBtn} title="Edit in composer" aria-label="Edit message in composer"><Pencil size={16} /></button>}
       {user && onResend && <button type="button" onClick={() => onResend(text)} className={actionBtn} title="Send again" aria-label="Send message again"><RotateCcw size={16} /></button>}
+      {!user && onFork && id && <button type="button" onClick={() => onFork(id)} className={actionBtn} title="Fork from here" aria-label="Fork the conversation into a new session from here"><GitFork size={16} /></button>}
       {user && onRewind && id && <button type="button" onClick={() => onRewind(id)} className={actionBtn} title="Rewind to this message" aria-label="Rewind the conversation to this message"><History size={16} /></button>}
     </div>
   );
@@ -160,7 +162,7 @@ export function MessageEntry({ e, reveal = true }: { e: HistoryEntry; reveal?: b
       <div className="prose-vd">
         <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins} components={markdownComponents}>{text}</ReactMarkdown>
       </div>
-      <ActionBar text={text} user={false} />
+      <ActionBar text={text} user={false} id={e.id} />
     </div>
   );
 }

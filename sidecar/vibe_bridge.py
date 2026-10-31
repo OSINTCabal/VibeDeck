@@ -35,6 +35,8 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
+from turn_input import message_blocks
+
 # Default model for vibecoding / general use. mistral-large-4 is Mistral's current
 # flagship: largest context window (512k), vision, function calling, top reasoning.
 DEFAULT_MODEL = "mistral-large-4"
@@ -444,10 +446,8 @@ class VibeAppServer:
     async def send_turn(self, session_id: str, text: str,
                         images: Optional[list[dict]] = None,
                         request_id: Optional[str] = None) -> dict:
-        message: list[dict] = [{"type": "text", "text": text}]
-        for img in images or []:
-            message.append({"type": "image", "attachment": img})
-        params: dict = {"sessionId": session_id, "message": message, "idempotencyKey": request_id}
+        params: dict = {"sessionId": session_id, "message": message_blocks(text, images),
+                        "idempotencyKey": request_id}
         if request_id:
             # Vibe keys the user message by this id; session/rewind finds the
             # message by it, so a turn sent without one cannot be rewound.

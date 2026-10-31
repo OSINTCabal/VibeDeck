@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getHistory, openSessionEvents, applyPatch } from "@/lib/api";
-import type { ChildSession, HistoryEntry, SessionStats, SseEvent } from "@/lib/types";
+import type { ChildSession, HistoryEntry, SessionStats, SseEvent, TurnQueue } from "@/lib/types";
 
 export interface ConversationState {
   entries: HistoryEntry[];
@@ -14,12 +14,13 @@ export interface ConversationState {
   error: string | null;
   lastEventId: number;
   historyBeforeCursor: string | null;
+  queue: TurnQueue | null;
 }
 
 export const initialConversation = (): ConversationState => ({
   entries: [], session: null, turnStatus: "idle", activeTurnId: null,
   stats: null, pendingCallbacks: [], childSessions: {},
-  loading: true, error: null, lastEventId: 0, historyBeforeCursor: null,
+  loading: true, error: null, lastEventId: 0, historyBeforeCursor: null, queue: null,
 });
 
 export function conversationEvent(s: ConversationState, ev: SseEvent): ConversationState {
@@ -47,6 +48,7 @@ export function conversationEvent(s: ConversationState, ev: SseEvent): Conversat
         childSessions: Object.fromEntries((ev.childSessions || []).map(c => [c.id, c])),
         stats: ev.stats ?? s.stats,
         historyBeforeCursor: ev.historyBeforeCursor ?? null,
+        queue: ev.turnQueue ?? null,
       };
       break;
     }
@@ -75,6 +77,7 @@ export function conversationEvent(s: ConversationState, ev: SseEvent): Conversat
         : [...s.entries, ev.callback];
       next.pendingCallbacks = next.entries.filter(e => e.type === "callback" && e.state?.status === "open");
       break;
+    case "queue": next.queue = ev.queue; break;
     case "childSession": next.childSessions = { ...s.childSessions, [ev.childSession.id]: ev.childSession }; break;
     case "error": next.error = ev.error; next.loading = false; break;
   }

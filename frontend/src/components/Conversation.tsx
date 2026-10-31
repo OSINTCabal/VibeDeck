@@ -1,15 +1,16 @@
 import * as React from "react";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowDown, Bot, ChevronDown, Cloud, Copy, FileDiff, Folder, GitFork, Loader2, Pencil, Terminal, Trash2, X } from "lucide-react";
 import { cn, formatTokens } from "@/lib/utils";
 import { Composer, type ImageAttachment } from "./Composer";
 import { CloudDialog } from "./CloudDialog";
+import { QueueBar } from "./QueueBar";
 import { ReviewPanel, pendingFiles } from "./ReviewPanel";
 import { RewindDialog } from "./RewindDialog";
 import { EntryBlock, MessageActions, StepGroup } from "./MessageBlocks";
 import { groupSteps } from "@/lib/steps";
 import { useConversation } from "@/hooks/useConversation";
-import { sendTurn, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
+import { sendTurn, enqueueTurn, forkSession, interruptTurn, resolveCallback, patchSession, releaseSession, deleteSession, getReview, type ReviewState } from "@/lib/api";
 import { SessionMenu } from "./SessionMenu";
 import { ensureNotificationPermission, notify } from "@/lib/notifications";
 import type { ChildSession, Session } from "@/lib/types";
@@ -72,7 +73,7 @@ export function Conversation({ session }: { session: Session }) {
   const send = async (t: string, images: ImageAttachment[]) => {
     const text = t.trim();
     if (!text && images.length === 0) return;
-    if (sendingRef.current || running || released) return;
+    if (sendingRef.current || released) return;
     sendingRef.current = true;
     setText("");
     setSendError(null);
@@ -81,7 +82,9 @@ export function Conversation({ session }: { session: Session }) {
     try {
       const payload = JSON.stringify([text, images]);
       if (requestRef.current?.payload !== payload) requestRef.current = { payload, id: crypto.randomUUID() };
-      await sendTurn(session.id, text, images, requestRef.current.id);
+      // while the agent works, the message waits in Vibe's turn queue
+      if (running) await enqueueTurn(session.id, text, images, requestRef.current.id);
+      else await sendTurn(session.id, text, images, requestRef.current.id);
       requestRef.current = null;
     } catch (e) {
       setText(t);
@@ -176,6 +179,26 @@ export function Conversation({ session }: { session: Session }) {
       navigate("/");
     } catch (e) { setSendError(`Could not delete: ${e}`); }
   };
+  // a fork opens as a new session; the original stays as it is
+  const fork = async (entryId?: string) => {
+    try {
+      const forked = await forkSession(session.id, entryId);
+      window.dispatchEvent(new Event("vibedeck:sessions"));
+      navigate(`/sessions/${forked.id}`);
+    } catch (e) { setSendError(`Could not fork: ${e}`); }
+  };
+  const forkRef = React.useRef(fork);
+  forkRef.current = fork;
+  // Vibe forks at a user message, keeping that turn's answer: forking from an
+  // answer starts at the message that asked for it
+  const entriesRef = React.useRef(conv.entries);
+  entriesRef.current = conv.entries;
+  const forkAt = (answerId: string) => {
+    const entries = entriesRef.current;
+    const at = entries.findIndex(e => e.id === answerId);
+    for (let i = at; i >= 0; i--) if (entries[i].type === "message" && entries[i].role === "user") return entries[i].id;
+    return undefined;
+  };
   // Message actions: stable callbacks so memoized entries do not re-render.
   const sendRef = React.useRef(send);
   sendRef.current = send;
@@ -186,6 +209,7 @@ export function Conversation({ session }: { session: Session }) {
     },
     onResend: (t: string) => { void sendRef.current(t, []).catch(() => {}); },
     onRewind: (id: string) => setRewindEntry(id),
+    onFork: (id: string) => { void forkRef.current(forkAt(id)); },
   }), []);
   const afterRewind = (message: string, _restored: string[], errors: string[]) => {
     setRewindEntry(null);
@@ -213,7 +237,7 @@ export function Conversation({ session }: { session: Session }) {
   };
 
   return (
-    <MessageActions.Provider value={running ? { ...actions, onRewind: undefined } : actions}>
+    <MessageActions.Provider value={running ? { ...actions, onRewind: undefined, onFork: undefined } : actions}>
     <div className="relative flex h-full">
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* header */}
@@ -233,6 +257,7 @@ export function Conversation({ session }: { session: Session }) {
               triggerClassName="grid h-7 w-7 shrink-0 place-items-center rounded-md text-text-muted transition-colors hover:bg-surface-muted hover:text-text"
               items={[
                 { label: "Rename", icon: Pencil, onSelect: () => setRenameRequest(n => n + 1) },
+                { label: "Fork session", icon: GitFork, onSelect: () => void fork(), disabled: running },
                 { label: "Continue in the cloud", icon: Cloud, onSelect: () => setCloudOpen(true), disabled: running },
                 { label: "Continue in the vibe CLI", icon: Terminal, onSelect: () => void handoffToCli(), disabled: running },
                 { label: "Copy session ID", icon: Copy, onSelect: () => void navigator.clipboard?.writeText(session.id).catch(() => {}) },
@@ -383,13 +408,16 @@ export function Conversation({ session }: { session: Session }) {
               <ArrowDown size={16} />
             </button>
           )}
+          <QueueBar sessionId={session.id} queue={conv.queue} activeTurnId={conv.activeTurnId} />
           <Composer
             value={text}
             onChange={setText}
             onSend={send}
             onStop={stop}
             running={running}
-            disabled={sending || released}
+            canQueue
+            // while the agent works, keep typing the next queued message
+            disabled={(sending && !running) || released}
             placeholder={`Message Vibe in ${session.cwd}…`}
             model={model}
             onModelChange={changeModel}
