@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Frontend
+node_modules
+frontend/dist/
+
+# Tauri / Rust
+shell/src-tauri/target/
+shell/src-tauri/gen/
+
+# Local data
+.env
+.env.*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+tsconfig.tsbuildinfo

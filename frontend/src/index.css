@@ -1,0 +1,299 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* VibeDeck design tokens — matches the Vibe webapp: neutral near-black + Mistral orange.
+   Themes are variable sets keyed by <html data-theme="...">; "dark" is the default. */
+@layer base {
+  :root {
+    --background: 240 4% 10%;
+    --foreground: 0 0% 95%;
+    --card: 240 3% 15%;
+    --card-foreground: 0 0% 95%;
+    --popover: 240 3% 15%;
+    --popover-foreground: 0 0% 95%;
+    --primary: 16 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 38 92% 55%;
+    --accent-foreground: 30 80% 16%;
+    --muted: 240 3% 16%;
+    --muted-foreground: 0 0% 62%;
+    --text-faint: 0 0% 45%;
+    --border: 240 3% 19%;
+    --input: 0 0% 22%;
+    --destructive: 0 62% 45%;
+    --ring: 24 100% 50%;
+    --sidebar-background: 240 5% 9%;
+    --sidebar-border: 240 3% 14%;
+    --sidebar-accent: 240 5% 4%;
+    --send-bg: 0 0% 100%;
+    --send-fg: 0 0% 0%;
+    --radius: 0.75rem;
+    color-scheme: dark;
+  }
+
+  /* Light — warm off-white paper + signature orange */
+  :root[data-theme="light"] {
+    --background: 40 30% 97%;
+    --foreground: 0 0% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 10%;
+    --primary: 24 100% 50%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 38 92% 42%;
+    --accent-foreground: 0 0% 100%;
+    --muted: 40 20% 91%;
+    --muted-foreground: 0 0% 38%;
+    --text-faint: 0 0% 45%;
+    --border: 35 15% 84%;
+    --input: 35 15% 76%;
+    --destructive: 0 62% 45%;
+    --ring: 24 100% 50%;
+    --sidebar-background: 40 25% 94%;
+    --sidebar-border: 35 15% 84%;
+    --sidebar-accent: 40 20% 89%;
+    --send-bg: 0 0% 7%;
+    --send-fg: 0 0% 100%;
+    color-scheme: light;
+  }
+
+  /* Midnight — deep blue-black */
+  :root[data-theme="midnight"] {
+    --background: 222 40% 6%;
+    --foreground: 210 30% 94%;
+    --card: 222 35% 10%;
+    --card-foreground: 210 30% 94%;
+    --popover: 222 35% 11%;
+    --popover-foreground: 210 30% 94%;
+    --primary: 24 100% 55%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 38 92% 58%;
+    --accent-foreground: 222 40% 8%;
+    --muted: 222 25% 15%;
+    --muted-foreground: 215 15% 60%;
+    --text-faint: 215 12% 52%;
+    --border: 222 20% 18%;
+    --input: 222 20% 24%;
+    --destructive: 0 62% 48%;
+    --ring: 24 100% 55%;
+    --sidebar-background: 222 42% 5%;
+    --sidebar-border: 222 25% 13%;
+    --sidebar-accent: 222 30% 12%;
+    --send-bg: 0 0% 100%;
+    --send-fg: 0 0% 0%;
+    color-scheme: dark;
+  }
+
+  /* Dim — softer dark, lower contrast */
+  :root[data-theme="dim"] {
+    --background: 30 6% 12%;
+    --foreground: 30 10% 88%;
+    --card: 30 6% 16%;
+    --card-foreground: 30 10% 88%;
+    --popover: 30 6% 17%;
+    --popover-foreground: 30 10% 88%;
+    --primary: 24 100% 52%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 38 92% 55%;
+    --accent-foreground: 30 80% 16%;
+    --muted: 30 5% 22%;
+    --muted-foreground: 30 8% 58%;
+    --text-faint: 30 8% 50%;
+    --border: 30 5% 26%;
+    --input: 30 5% 32%;
+    --destructive: 0 62% 48%;
+    --ring: 24 100% 52%;
+    --sidebar-background: 30 6% 10%;
+    --sidebar-border: 30 5% 20%;
+    --sidebar-accent: 30 5% 20%;
+    --send-bg: 0 0% 100%;
+    --send-fg: 0 0% 0%;
+    color-scheme: dark;
+  }
+
+
+  :root[data-theme="forest"] {
+    --background: 145 22% 8%; --foreground: 145 22% 95%;
+    --card: 145 16% 12%; --card-foreground: 145 22% 95%;
+    --popover: 145 16% 12%; --popover-foreground: 145 22% 95%;
+    --primary: 158 55% 60%; --primary-foreground: 145 22% 8%;
+    --accent: 158 55% 60%; --accent-foreground: 145 22% 8%;
+    --muted: 145 14% 18%; --muted-foreground: 145 12% 68%; --text-faint: 145 10% 57%;
+    --border: 145 13% 26%; --input: 145 13% 32%; --ring: 158 55% 60%;
+    --sidebar-background: 145 22% 7%; --sidebar-border: 145 13% 20%; --sidebar-accent: 145 14% 16%;
+  }
+  :root[data-theme="plum"] {
+    --background: 270 18% 10%; --foreground: 270 22% 96%;
+    --card: 270 20% 17%; --card-foreground: 270 22% 96%;
+    --popover: 270 20% 17%; --popover-foreground: 270 22% 96%;
+    --primary: 270 80% 75%; --primary-foreground: 270 18% 10%;
+    --accent: 270 80% 75%; --accent-foreground: 270 18% 10%;
+    --muted: 270 16% 22%; --muted-foreground: 270 14% 70%; --text-faint: 270 12% 58%;
+    --border: 270 16% 29%; --input: 270 16% 35%; --ring: 270 80% 75%;
+    --sidebar-background: 270 18% 8%; --sidebar-border: 270 16% 23%; --sidebar-accent: 270 16% 18%;
+  }
+  :root[data-theme="contrast"] {
+    --background: 0 0% 0%; --foreground: 0 0% 100%;
+    --card: 0 0% 5%; --card-foreground: 0 0% 100%;
+    --popover: 0 0% 5%; --popover-foreground: 0 0% 100%;
+    --primary: 39 100% 60%; --primary-foreground: 0 0% 0%;
+    --accent: 39 100% 60%; --accent-foreground: 0 0% 0%;
+    --muted: 0 0% 15%; --muted-foreground: 0 0% 85%; --text-faint: 0 0% 75%;
+    --border: 0 0% 60%; --input: 0 0% 65%; --ring: 39 100% 60%;
+    --sidebar-background: 0 0% 0%; --sidebar-border: 0 0% 50%; --sidebar-accent: 0 0% 15%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    background: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Thin, dark scrollbars */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 8px;
+    border: 2px solid hsl(var(--background));
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--input));
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.35);
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+/* The round send/stop button — white-on-dark in dark themes, inverted in light.
+   Unlayered so this transition (which includes opacity, unlike the
+   transition-colors utility) wins and the hover dims smoothly. */
+.vd-send {
+  background: hsl(var(--send-bg));
+  color: hsl(var(--send-fg));
+  transition: opacity 160ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.vd-send:hover {
+  opacity: 0.88;
+}
+
+/* Markdown content inside assistant messages */
+@layer components {
+  .prose-vd {
+    @apply text-[15px] leading-relaxed text-text;
+  }
+  .prose-vd p { @apply my-2 first:mt-0 last:mb-0; }
+  .prose-vd ul { @apply list-disc pl-5 my-2 space-y-1; }
+  .prose-vd ol { @apply list-decimal pl-5 my-2 space-y-1; }
+  .prose-vd li { @apply my-0.5; }
+  .prose-vd h1, .prose-vd h2, .prose-vd h3, .prose-vd h4 {
+    @apply font-semibold text-text mt-4 mb-2 first:mt-0;
+  }
+  .prose-vd h1 { @apply text-xl; }
+  .prose-vd h2 { @apply text-lg; }
+  .prose-vd h3 { @apply text-base; }
+  .prose-vd a { @apply text-primary underline underline-offset-2; }
+  .prose-vd strong { @apply font-semibold text-text; }
+  .prose-vd blockquote {
+    @apply border-l-2 border-border pl-3 text-text-muted italic my-2;
+  }
+  .prose-vd hr { @apply border-border my-4; }
+  .prose-vd table { @apply w-full text-sm my-3 border-collapse; }
+  .prose-vd th { @apply text-left font-medium text-text-muted border border-border px-2 py-1; }
+  .prose-vd td { @apply border border-border px-2 py-1 align-top; }
+  .prose-vd :not(pre) > code {
+    @apply font-mono text-[13px] bg-surface-muted px-1.5 py-0.5 rounded;
+    color: hsl(var(--accent));
+  }
+  .prose-vd pre {
+    @apply font-mono text-[13px] bg-[#0d0b09] border border-border rounded-lg p-3 my-3 overflow-x-auto;
+  }
+  .prose-vd pre code {
+    @apply bg-transparent p-0;
+    color: hsl(var(--foreground));
+  }
+}
+
+/* ---- webapp-style motion ------------------------------------------------ */
+
+/* staggered fade-up used on the welcome screen and for entering messages */
+@keyframes vd-reveal {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.vd-reveal {
+  /* Release the transform after entry so dropdowns are not trapped behind sibling cards. */
+  animation: vd-reveal 420ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+dialog[open] {
+  animation: vd-reveal 160ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+/* three-dot "working" indicator while a turn runs */
+@keyframes vd-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.35; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+.vd-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.vd-dots > span {
+  width: 4px;
+  height: 4px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: vd-dot 1.1s ease-in-out infinite;
+}
+.vd-dots > span:nth-child(2) { animation-delay: 0.15s; }
+.vd-dots > span:nth-child(3) { animation-delay: 0.3s; }
+
+.context-disclosure {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition: grid-template-rows 200ms ease, opacity 150ms ease, visibility 0s 200ms;
+}
+.context-disclosure[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

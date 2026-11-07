@@ -1,0 +1,1 @@
+"""VibeDeck sidecar package."""

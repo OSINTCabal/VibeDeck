@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# VibeDeck launcher — ensures the local sidecar is running, then opens the app
+# in a dedicated frameless window. Safe to run repeatedly; reuses a live sidecar.
+set -eu
+
+# Resolve the app home: explicit override, else the repo checkout, else installed.
+APP_HOME="${VIBEDECK_HOME:-}"
+if [ -z "$APP_HOME" ]; then
+  if [ -f "$(dirname "$(readlink -f "$0")")/../../sidecar/vibedeck_server.py" ]; then
+    APP_HOME="$(cd "$(dirname "$(readlink -f "$0")")/../.." && pwd)"
+  elif [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/vibedeck/sidecar/vibedeck_server.py" ]; then
+    APP_HOME="${XDG_DATA_HOME:-$HOME/.local/share}/vibedeck"
+  else
+    echo "VibeDeck: cannot locate the sidecar. Set VIBEDECK_HOME to the app root." >&2
+    exit 1
+  fi
+fi
+
+CFG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/vibedeck"
+# Preserve the CLI credential; the sidecar reads its separate desktop key from this file.
+CLI_KEY="${MISTRAL_API_KEY-}"
+CLI_KEY_SET="${MISTRAL_API_KEY+x}"
+# Load launcher settings, never log them.
+if [ -f "$CFG_DIR/env" ]; then
+  set -a; . "$CFG_DIR/env"; set +a
+fi
+if [ "$CLI_KEY_SET" = x ]; then
+  export MISTRAL_API_KEY="$CLI_KEY"
+else
+  unset MISTRAL_API_KEY
+fi
+unset CLI_KEY CLI_KEY_SET
+
+URL="http://127.0.0.1:${VIBEDECK_PORT:-9377}"
+PY="$APP_HOME/.venv/bin/python"
+[ -x "$PY" ] || PY="$(command -v python3)"
+export VIBEDECK_DATA="${VIBEDECK_DATA:-${XDG_DATA_HOME:-$HOME/.local/share}/vibedeck}"
+
+up() { curl -fsS --max-time 1 "$URL/api/health" >/dev/null 2>&1; }
+
+if ! up; then
+  mkdir -p "$VIBEDECK_DATA/logs"
+  setsid nohup "$PY" -m uvicorn vibedeck_server:app \
+    --app-dir "$APP_HOME/sidecar" \
+    --host 127.0.0.1 --port "${VIBEDECK_PORT:-9377}" \
+    >>"$VIBEDECK_DATA/logs/sidecar.log" 2>&1 </dev/null &
+  for _ in $(seq 1 40); do
+    up && break
+    sleep 0.5
+  done
+fi
+
+up || { echo "Sidecar failed to start; see $VIBEDECK_DATA/logs/sidecar.log" >&2; exit 1; }
+
+export VIBEDECK_URL="$URL"
+
+# App window: the Electron shell is preferred — a true frameless window whose
+# title bar is rendered by the app itself (window controls, drag region).
+ELECTRON_BIN="${VIBEDECK_ELECTRON:-}"
+if [ -z "$ELECTRON_BIN" ]; then
+  for c in "$APP_HOME/shell/electron/node_modules/electron/dist/electron" \
+           "$(command -v electron 2>/dev/null || true)"; do
+    if [ -n "$c" ] && [ -x "$c" ]; then ELECTRON_BIN="$c"; break; fi
+  done
+fi
+if [ -n "$ELECTRON_BIN" ] && [ -d "$APP_HOME/shell/electron" ]; then
+  exec "$ELECTRON_BIN" "$APP_HOME/shell/electron" "$@"
+fi
+
+# Fallback: Chromium/Chrome app mode (keeps the system title bar; the app
+# hides its in-app title bar when no shell bridge is present).
+for b in chromium-browser google-chrome-stable google-chrome chromium chrome; do
+  if command -v "$b" >/dev/null 2>&1; then
+    exec "$b" --app="$URL" --class=vibedeck --name=vibedeck \
+              --disable-session-crashed-bubble --no-first-run "$@"
+  fi
+done
+command -v firefox >/dev/null 2>&1 && exec firefox --new-window "$URL"
+exec xdg-open "$URL"
